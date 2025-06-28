@@ -9,9 +9,7 @@
     "setup": "python setup_directories.py",
     "test": "python -m pytest tests/ -v"
   },
-  "dependencies": {
-    "python": "^3.10.0"
-  },
+  "dependencies": {},
   "devDependencies": {},
   "keywords": ["rss", "news", "python", "pipeline"],
   "author": "RSS Collector Team",
