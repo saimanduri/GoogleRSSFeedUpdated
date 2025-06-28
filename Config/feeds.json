@@ -1,0 +1,44 @@
+{
+  "keywords": [
+    {
+      "name": "Reserve Bank of India",
+      "terms": [
+        "RBI",
+        "Reserve Bank of India",
+        "Indian Central Bank",
+        "Central Bank",
+        "Banking regulator",
+        "Central banking"
+      ]
+    },
+    {
+      "name": "Business & Finance",
+      "terms": [
+        "stock market",
+        "economy",
+        "inflation"
+      ]
+    },
+
+    {
+      "name": "India Specific",
+      "terms": [
+        "India economy",
+        "Indian banking",
+        "Indian Finance",
+        "Sanjay Malhotra"
+      ]
+    },
+ 
+  ],
+  "settings": {
+    "language": "en",
+    "country": "IN",
+    "max_articles_per_keyword": 50,
+    "content_filtering": {
+      "min_title_length": 10,
+      "exclude_domains": [],
+      "include_sources_only": false
+    }
+  }
+}
