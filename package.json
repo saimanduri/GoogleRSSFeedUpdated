@@ -4,10 +4,11 @@
   "description": "Offline-friendly Google News RSS ingestion pipeline for LLM integration",
   "main": "index.js",
   "scripts": {
-    "start": "python src/main.py --run-now",
-    "schedule": "python src/main.py --schedule",
+    "install-deps": "python -m pip install --user -r requirements.txt",
+    "start": "python -m pip install --user -r requirements.txt && python src/main.py --run-now",
+    "schedule": "python -m pip install --user -r requirements.txt && python src/main.py --schedule",
     "setup": "python setup_directories.py",
-    "test": "python -m pytest tests/ -v"
+    "test": "python -m pip install --user -r requirements.txt && python -m pytest tests/ -v"
   },
   "dependencies": {},
   "devDependencies": {},
