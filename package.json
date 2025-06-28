@@ -2,17 +2,25 @@
   "name": "google-news-rss-pipeline",
   "version": "1.0.0",
   "description": "Offline-friendly Google News RSS ingestion pipeline for LLM integration",
-  "main": "index.js",
+  "main": "src/main.js",
+  "type": "module",
   "scripts": {
-    "install-deps": "python3 -m ensurepip --upgrade && python3 -m pip install --user -r requirements.txt",
-    "start": "python3 -m ensurepip --upgrade && python3 -m pip install --user -r requirements.txt && python3 src/main.py --run-now",
-    "schedule": "python3 -m ensurepip --upgrade && python3 -m pip install --user -r requirements.txt && python3 src/main.py --schedule",
-    "setup": "python3 setup_directories.py",
-    "test": "python3 -m ensurepip --upgrade && python3 -m pip install --user -r requirements.txt && python3 -m pytest tests/ -v"
+    "start": "node src/main.js --run-now",
+    "schedule": "node src/main.js --schedule",
+    "setup": "node setup_directories.js",
+    "test": "node --test tests/*.test.js",
+    "dev": "node --watch src/main.js --run-now"
   },
-  "dependencies": {},
+  "dependencies": {
+    "rss-parser": "^3.13.0",
+    "node-cron": "^3.0.3",
+    "axios": "^1.6.0",
+    "fs-extra": "^11.1.1",
+    "date-fns": "^2.30.0",
+    "dotenv": "^16.3.1"
+  },
   "devDependencies": {},
-  "keywords": ["rss", "news", "python", "pipeline"],
+  "keywords": ["rss", "news", "nodejs", "pipeline"],
   "author": "RSS Collector Team",
   "license": "MIT"
 }
