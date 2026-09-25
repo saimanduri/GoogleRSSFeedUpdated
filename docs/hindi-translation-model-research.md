@@ -238,6 +238,23 @@ Feeding isolated (English sentence → Hindi sentence) pairs, even a huge number
 4. **Evaluate discourse quality directly, not just BLEU/chrF.** Standard sentence-level metrics don't reward correct pronoun resolution or consistent terminology across a document — that's the whole reason IndicDISCO-MT exists. Build (or reuse, if licensing allows) a small discourse-focused eval set: same entity referred to across sentences, ambiguous pronouns, repeated terms that must stay consistent, and check those specifically, alongside your usual native-speaker blind test.
 5. **Named entities and numbers stay your other priority** — same as before, and doubly important in a context-aware setting where an entity introduced in sentence 1 needs to be referred to consistently in sentence 3.
 
+### Hardware check: single RTX 5090 (32GB GDDR7, 1.79TB/s bandwidth)
+
+This is one high-end consumer card, not a multi-GPU server, and it changes the full-fine-tune-vs-LoRA answer above:
+
+| Target model | Full fine-tune (BF16) | QLoRA (4-bit) |
+|---|---|---|
+| **TranslateGemma-12B** | Tight to infeasible on 32GB once gradients/optimizer states and a real batch/sequence length are added — BF16 weights alone are ~24GB before training overhead ([Spheron sizing guide](https://www.spheron.network/blog/gpu-vram-requirements-fine-tune-llm-2026/)) | **Comfortable.** 4-bit weights need well under 16GB, leaving plenty of headroom for long context windows and a decent batch size |
+| **TranslateGemma-27B** | **Not feasible** on a single 32GB card | **Feasible, with care.** Reported as working with gradient checkpointing, e.g. sequence length ~4096 on a 32GB card ([ai.rs writeup](https://ai.rs/ai-developer/gemma-4-lora-fine-tuning-rtx-5090)) — but batch size will be small and training slower than 12B |
+
+**So on a single 5090: skip full fine-tuning, do QLoRA.** That doesn't cost you much — the earlier "full fine-tune beats LoRA" evidence was comparing full fine-tuning against *low-rank* LoRA; a well-configured QLoRA run (higher rank, all-linear-layer adapters, enough training steps) closes most of that gap, and it's the only realistic option on this GPU for the 27B model anyway.
+
+**Practical path on one 5090:**
+1. Start with **TranslateGemma-12B + QLoRA**. It fits comfortably, trains faster, and lets you iterate quickly on your context-window data format (this is where most of your quality gain will actually come from, not from model size).
+2. Once that pipeline and your context-concatenation data prep are validated, try **TranslateGemma-27B + QLoRA** on the same card for a direct quality comparison — expect to reduce sequence length or batch size and use gradient checkpointing to make it fit.
+3. If 27B QLoRA still leaves quality on the table and you want a full fine-tune, that needs either a bigger card (80GB-class, e.g. rented A100/H100) or multi-GPU — not a change you can make on this hardware alone. Cross that bridge only after QLoRA has told you whether it's worth it.
+4. One 5090 also comfortably serves your fine-tuned 12B model for inference afterward; 27B inference will fit too, just with less headroom for concurrent requests.
+
 ### Revised path, in order
 
 1. Prep the data: verify/rebuild article-level grouping, build concatenated-context training examples, hold out both a generic-domain eval set and a discourse-focused eval set.
