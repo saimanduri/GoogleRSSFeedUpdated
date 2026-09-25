@@ -15,6 +15,7 @@
 | 3 | **Sarvam-Translate** (Gemma-3-4B fine-tune) | Document-level or formatted text (markdown, lists) across 22 languages | Expert human evaluation, but run by the vendor. Users report repetition loops |
 | Watch | **Bodhan AI Indic-Translate** (Sept 2026), **IndicTrans3-beta** | Worth testing, but not trusting yet | Only self-reported numbers so far. Human evaluation "in progress" |
 | Avoid | NLLB-200, and general chat LLMs used as translators | — | See below |
+| Not comparable | **Process9 Mox (MoxVeda / MoxWave / MoxNMT)** | You're paying for a managed, human-reviewed website or app localization service | **Weak for accuracy.** It's proprietary and not open source, with no independent benchmark. Its adoption is real, but the evidence is vendor-published (see [Process9 section](#comparison-with-process9-mox-moxveda--moxwave--moxnmt)) |
 
 **Bottom line:** For accurate, low-risk Hindi translation today, **IndicTrans2 is still the best-proven open model.** It is not the most fluent. LLM-based translators, especially TranslateGemma-27B, often read more naturally. But IndicTrans2 has the most real-world proof: it runs in production at national scale, and independent human evaluators preferred it to other open systems. The newer LLM-based models have not yet shown that kind of accuracy for Hindi in independent tests.
 
@@ -57,6 +58,81 @@
 ### Why not the others
 - **NLLB-200:** Independent studies document hallucination, repetition and omissions ([arXiv 2511.00486](https://arxiv.org/pdf/2511.00486)). It loses to IndicTrans2 in human evaluation. Its licence is **CC-BY-NC**, and Meta calls it a research model, not for production.
 - **General LLMs (Sarvam-30B/105B, Qwen3, Llama, Gemma 4):** SEO "best LLM for Hindi" listicles recommend them, but those lists are not translation evaluations. Independent tests show mixed Indic results. For example, Gemma 4 31B beat Sarvam-30B on a multilingual benchmark in every language ([Medium](https://medium.com/@indiai/india-first-llms-on-indian-languages-sarvam-30b-and-param2-17b-6676b637f3ab)). Users also report Gemma 4 **code-switching into English** on specialised topics ([DEV](https://dev.to/devsaquib/i-tested-gemma-4-and-gpt-4o-mini-on-indian-language-tasks-the-results-surprised-me-19g8)). For pure translation, a dedicated model is cheaper and more predictable.
+
+---
+
+## Comparison with Process9 Mox (MoxVeda / MoxWave / MoxNMT)
+
+**What it is.** Process Nine Technologies is a Gurugram localization company, founded in 2009. It had about 74 staff in Aug 2025 and has raised about $1.13M ([Tracxn](https://tracxn.com/d/companies/process9/__3TYOJxGK4MIefKX83cR_0B4GSVIV6HiLtE6T9DgoATE)). It sells the **Mox suite**:
+- **MoxVeda** is a website and app localization layer. It translates a live site with no code or database changes and keeps it in sync with the English source ([MoxVeda](https://process9.com/mox-veda/)). It is a *platform*, not a model, and "can integrate with any machine translation engine of your choice."
+- **MoxWave** is the translation API ([MoxWave](https://process9.com/mox-wave/)).
+- **MoxNMT** is the proprietary Indic translation engine underneath ([Azure Marketplace sheet](https://catalogartifact.azureedge.net/publicartifacts/processninetechnologiespvtltd1640269656476.mox_nmt_01-c7b98300-c120-485b-b98b-a54f62394d46/Artifacts/Documents/Process9_MoxNMT.pdf)).
+- The suite adds human-in-the-loop review, translation memory, glossaries and style guides. It is ISO 27001 certified ([Mox vs Bhashini](https://process9.com/mox-vs-bhashini/)).
+
+**It is not open source.** Mox is a closed, subscription SaaS. It is not a like-for-like alternative to IndicTrans2 or TranslateGemma. The fair comparison is with a *commercial service* (Google or Azure Translate plus human post-editing).
+
+**Accuracy evidence found:**
+- **Vendor claim:** "95%+ accuracy in Hindi, Tamil, Bengali vs ~80% in generic tools," trained on 100M+ Indian-language phrases ([Process9 FAQ](https://process9.com/faq-translation-tools-indian-languages/)). The metric, test set and method are **not disclosed**, so the figure cannot be checked or compared with BLEU, chrF or human-evaluation scores elsewhere.
+- **Independent benchmarks:** **none found.** MoxNMT does not appear in any academic comparison (IN22, FLORES, WMT, the ITEM study) or in any public leaderboard. The English–Hindi comparison studies cited above tested Google, IndicTrans2, NLLB, OPUS-MT, Bing and Anuvad, not Process9.
+- **Independent user reviews:** **none found** on G2, Capterra, Reddit or blogs. No complaints were found either. The public signal is simply thin.
+
+**Real-world adoption, all vendor-published:**
+- **Axis Bank:** Hindi customer-support site went live in Jan 2022 on MoxVeda. Axis said it "carefully evaluated many options… chose Process9" for ease of use, security, speed and quality ([case study](https://process9.com/case-study/axis-bank-case-study/)).
+- **Tata 1mg:** 500k+ healthcare product listings localized into Hindi. Hindi user sessions "more than doubled in a month" ([case study](https://process9.com/case-study/tata-1mg/)).
+- **Startup India:** has used Process9 for about 5 years across 22 Indian and 19 foreign languages; describes "good accuracy" at high volume ([Process9 site](https://process9.com/)).
+- **Paytm, PolicyBazaar, MakeMyTrip, BookMyShow** are named as customers. PolicyBazaar saw 3× interest in bike insurance after selling in Hindi ([YourStory](https://yourstory.com/2020/10/raise-2020-startup-indic-language-interface-paytm-policybazaar)).
+- **How to read this:** long-term, regulated-industry customers (a bank, a pharmacy platform, a government programme) are a meaningful signal that the output is *acceptable in production*. But:
+  - The quotes are vendor-published.
+  - The numbers measure *business engagement* (sessions, interest), not translation accuracy.
+  - The final quality depends heavily on the **human reviewers** in the workflow, not only the machine output.
+
+**Fit for this repo:** poor. The pipeline is built to be offline or air-gapped, and Mox is a hosted SaaS. No on-premise or offline model release was found. It also costs a subscription and sends feed content to a third party.
+
+### Comparison table
+
+| | IndicTrans2 | TranslateGemma 12B/27B | Sarvam-Translate | Bodhan Indic-Translate | NLLB-200 | **Process9 Mox** |
+|---|---|---|---|---|---|---|
+| Type | Open model (MIT) | Open weights (Gemma terms) | Open weights (check card) | Open weights (new) | Open, **non-commercial** (CC-BY-NC) | **Proprietary SaaS + human review** |
+| Hindi-specific | Yes (22 langs) | Yes (55 langs) | Yes (22 langs) | Yes (22 langs) | Yes (200 langs) | Yes (22+ langs claimed) |
+| **Independent human evaluation for Hindi** | ✅ Beat NLLB (11-factor human study); close 2nd to Google | ❌ Not for Hindi (MQM covered Marathi) | ❌ Vendor-run only | ❌ "In progress" | ✅ Loses to IndicTrans2 | ❌ None |
+| Vendor accuracy claim | chrF++ on public IN22 (reproducible) | MetricX on WMT24++ (reproducible) | Expert pairwise preference | dBLEU 58.97 on in-house set | chrF on FLORES (reproducible) | "95%+ accuracy" (**method not disclosed**) |
+| Real-world deployment | Bhashini (national, e.g. Red Fort speech 2026); Wikipedia MinT | Hobbyist and dev use (Ollama) | Sarvam API users | None yet (1 month old) | Wikipedia MinT (other langs) | Axis Bank, Tata 1mg, Startup India, Paytm, PolicyBazaar |
+| Is the real-world evidence independent? | ✅ Yes (govt and Wikimedia public records) | Partly (blogs, anecdotal) | Partly (HF discussions) | ❌ | ✅ (academic papers) | ❌ Vendor case studies only |
+| Reported problems | Stiff register; sentence splitting needed; 200–256-token limit (fixed in RoPE variant) | 4B weak; worse past 2K tokens | Repetition/gibberish loops; literal idioms | Unknown | Hallucination, repetition, omissions | None public (no independent reviews found) |
+| Runs offline / on CPU | ✅ Yes (200M on CPU; CTranslate2) | ⚠️ GPU needed for 12B/27B | ⚠️ GPU preferred | ⚠️ GPU (vLLM / TensorRT) | ✅ Yes | ❌ Hosted service |
+| Cost | Free | Free (hardware) | Free (hardware) | Free (hardware) | Free, non-commercial only | Paid subscription |
+| Human-in-the-loop / TM / glossary | DIY | DIY | DIY | DIY | DIY | ✅ Built in |
+| **Verdict for this repo** | **Use (default)** | Use if GPU; A/B vs IndicTrans2 | Try, watch for loops | Re-check in 2–3 months | Avoid | Not suitable (closed, online, unverifiable accuracy); consider only for customer-facing sites needing human review |
+
+### All findings, by source and independence
+
+| # | Finding | Model / vendor | Source | Independent of vendor? |
+|---|---|---|---|---|
+| 1 | Live-translated PM's Hindi speech into 22 languages in production (Aug 2026) | IndicTrans2 | [TechTimes](https://www.techtimes.com/articles/324582/20260815/india-deploys-homegrown-ai-red-fort-pledges-ai-training-ten-million-youth.htm) | ✅ |
+| 2 | Serves Wikipedia editors via MinT on CPU | IndicTrans2, NLLB | [MediaWiki MinT](https://www.mediawiki.org/wiki/MinT) | ✅ |
+| 3 | Human 11-factor evaluation: IndicTrans2 better than NLLB for En–Hi | IndicTrans2 vs NLLB | [Springer](https://link.springer.com/chapter/10.1007/978-3-031-91331-0_7) | ✅ |
+| 4 | En–Hi comparison: Google 1st, IndicTrans2 close 2nd, NLLB and OPUS trail | IndicTrans2, NLLB | [arXiv 2505.19604](https://arxiv.org/abs/2505.19604) | ✅ |
+| 5 | GPT-4o-mini beats IndicTrans2 on Hindi; IndicTrans2 wins in most other languages | IndicTrans2 | [ACL 2026 ITEM](https://aclanthology.org/2026.acl-long.1171/) | ✅ |
+| 6 | Stiff on conversational text; +6.2 chrF after adaptation | IndicTrans2 | [arXiv 2606.29024](https://arxiv.org/abs/2606.29024) | ✅ |
+| 7 | 200–256-token limit; long-context RoPE variant Jan 2025; users ask about batching documents | IndicTrans2 | [GitHub](https://github.com/AI4Bharat/IndicTrans2), [#58](https://github.com/AI4Bharat/IndicTrans2/issues/58) | ✅ |
+| 8 | 12B beats Gemma 3 27B on MetricX | TranslateGemma | [Google blog](https://blog.google/innovation-and-ai/technology/developers-tools/translategemma/) | ❌ vendor |
+| 9 | MQM human evaluation covered Marathi, not Hindi | TranslateGemma | [Tech report review](https://www.themoonlight.io/en/review/translategemma-technical-report) | ❌ vendor |
+| 10 | Users: "outstanding vs other offline models"; use 12B/27B, not 4B; worse past 2K tokens | TranslateGemma | [Medium](https://medium.com/free-or-open-source-software/demo-translategemma-ollama-obsidian-55-languages-offline-ai-powered-translation-global-indian-14ae927d8aa3), [AiCybr](https://aicybr.com/blog/translategemma-guide) | ✅ (anecdotal) |
+| 11 | Expert pairwise evaluation: better than Gemma3-27B, Llama-4 Scout, Llama-3.1-405B | Sarvam-Translate | [Sarvam blog](https://www.sarvam.ai/blogs/sarvam-translate) | ❌ vendor |
+| 12 | Output-token repetition / gibberish reported by users | Sarvam-Translate | [HF #7](https://huggingface.co/sarvamai/sarvam-translate/discussions/7), [HF #13](https://huggingface.co/sarvamai/sarvam-translate/discussions/13) | ✅ |
+| 13 | Literal, unnatural idiom rendering (Kannada) | Sarvam-Translate | [Thejesh GN](https://thejeshgn.com/2025/06/10/first-impressions-of-sarvam-indic-translate-model/) | ✅ |
+| 14 | 58.97 dBLEU vs Sarvam 47.44 vs IndicTrans2 31.93 on in-house set; human evaluation pending | Bodhan Indic-Translate | [HF](https://huggingface.co/bodhan-ai/indic-translate), [Analytics Vidhya](https://www.analyticsvidhya.com/blog/2026/09/bodhan-ai-indic-models/) | ❌ vendor |
+| 15 | Gemma-3-based, document-level, still beta | IndicTrans3-beta | [HF](https://huggingface.co/ai4bharat/IndicTrans3-beta) | ❌ vendor |
+| 16 | Hallucination, repetition, omissions; research-only licence | NLLB-200 | [arXiv 2511.00486](https://arxiv.org/pdf/2511.00486), [HF card](https://huggingface.co/facebook/nllb-200-3.3B) | ✅ |
+| 17 | Gemma 4 31B beats Sarvam-30B across Indic languages; Gemma 4 code-switches into English | General LLMs | [Medium](https://medium.com/@indiai/india-first-llms-on-indian-languages-sarvam-30b-and-param2-17b-6676b637f3ab), [DEV](https://dev.to/devsaquib/i-tested-gemma-4-and-gpt-4o-mini-on-indian-language-tasks-the-results-surprised-me-19g8) | ✅ (anecdotal) |
+| 18 | "95%+ accuracy in Hindi vs ~80% generic"; method not disclosed | Process9 MoxNMT | [Process9 FAQ](https://process9.com/faq-translation-tools-indian-languages/) | ❌ vendor |
+| 19 | MoxVeda = website localization layer; works with any MT engine; human-in-the-loop | Process9 MoxVeda | [MoxVeda](https://process9.com/mox-veda/) | ❌ vendor |
+| 20 | Axis Bank Hindi support site live Jan 2022; chose Mox after evaluating options | Process9 | [Case study](https://process9.com/case-study/axis-bank-case-study/) | ❌ vendor-published testimonial |
+| 21 | Tata 1mg: 500k+ products in Hindi; Hindi sessions 2× in a month | Process9 | [Case study](https://process9.com/case-study/tata-1mg/) | ❌ vendor-published |
+| 22 | Startup India: about 5 years of use, "good accuracy" at volume | Process9 | [Process9 site](https://process9.com/) | ❌ vendor-published |
+| 23 | Customers incl. Paytm, PolicyBazaar, MakeMyTrip, BookMyShow; PolicyBazaar 3× interest in Hindi | Process9 | [YourStory](https://yourstory.com/2020/10/raise-2020-startup-indic-language-interface-paytm-policybazaar) | ⚠️ press, based on company interview |
+| 24 | No independent benchmark, academic evaluation or public user review found | Process9 | Searches of academic, G2/Capterra and community sources | — (absence of evidence) |
+| 25 | Small company: about 74 staff, about $1.13M raised | Process9 | [Tracxn](https://tracxn.com/d/companies/process9/__3TYOJxGK4MIefKX83cR_0B4GSVIV6HiLtE6T9DgoATE) | ✅ |
 
 ---
 
