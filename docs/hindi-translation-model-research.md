@@ -13,7 +13,7 @@
 | **1 (default)** | **AI4Bharat IndicTrans2** (`indictrans2-en-indic-1B`, or `-dist-200M` for CPU) | Accurate, predictable English→Hindi on CPU or a small GPU, offline | **Strongest.** Runs in production at national scale, and independent human evaluations back it |
 | 2 | **Google TranslateGemma 12B / 27B** | You have a GPU and want more natural, context-aware Hindi for whole paragraphs | Good automatic metrics and positive but anecdotal user reports. No published human evaluation for Hindi |
 | 3 | **Sarvam-Translate** (Gemma-3-4B fine-tune) | Document-level or formatted text (markdown, lists) across 22 languages | Expert human evaluation, but run by the vendor. Users report repetition loops |
-| Watch | **Bodhan AI Indic-Translate** (Sept 2026), **IndicTrans3-beta** | Worth testing, but not trusting yet | Only self-reported numbers so far. Human evaluation "in progress" |
+| Watch | **Bodhan AI Indic-Translate** (Sept 2026), **IndicTrans3-beta** (Gemma-3 backbone, document-level) | Worth testing, but not trusting yet | No published benchmark table or human evaluation found for either. Still beta/"in progress" |
 | Avoid | NLLB-200, and general chat LLMs used as translators | — | See below |
 | Not comparable | **Process9 Mox (MoxVeda / MoxWave / MoxNMT)** | You're paying for a managed, human-reviewed website or app localization service | **Weak for accuracy.** It's proprietary and not open source, with no independent benchmark. Its adoption is real, but the evidence is vendor-published (see [Process9 section](#comparison-with-process9-mox-moxveda--moxwave--moxnmt)) |
 
@@ -34,6 +34,47 @@
 - **Stiff, formal register.** It sounds wooden on casual or conversational text. A 2026 paper fine-tuned it for conversation and gained +6.2 chrF on average ([arXiv 2606.29024](https://arxiv.org/abs/2606.29024)). Formal register is fine for news.
 - **Sentence-level model.** The original models truncate input at about 200–256 tokens. You must split text into sentences. RoPE long-context variants (up to 2048 tokens) came out in January 2025 ([GitHub](https://github.com/AI4Bharat/IndicTrans2)). Users have asked how to batch whole documents ([issue #58](https://github.com/AI4Bharat/IndicTrans2/issues/58)).
 - **Hindi is where LLMs are catching up.** In the ACL 2026 *ITEM* study, **GPT-4o-mini beat IndicTrans2 for Hindi**, while IndicTrans2 won in most other Indian languages ([ACL Anthology](https://aclanthology.org/2026.acl-long.1171/)). Hindi has so much training data that large LLMs now match or beat specialised MT models on it. This is why TranslateGemma-27B is a real contender for Hindi specifically.
+
+---
+
+## IndicTrans2 (dedicated NMT) vs. a best-in-class LLM (Gemma / GPT-4o-class)
+
+This is the real fork in the road: a small, purpose-built translation model vs. a general-purpose LLM used as a translator. Evidence is thinner than either side's own marketing suggests, but here's what independent sources show.
+
+| | IndicTrans2 (dedicated NMT) | Gemma 3/4-class or GPT-4o-class LLM |
+|---|---|---|
+| What it is | 1B (or 200M) encoder-decoder, trained only to translate | 4B–400B general model, translating via instructions |
+| Hindi accuracy, independent test | Close 2nd to Google Translate, ahead of NLLB/OPUS ([arXiv 2505.19604](https://arxiv.org/abs/2505.19604)) | In the ACL 2026 **ITEM** study, **GPT-4o-mini beat IndicTrans2 specifically on Hindi** — the one language in that 6-language study where the dedicated model lost ([ACL Anthology](https://aclanthology.org/2026.acl-long.1171/)) |
+| Other Indic languages | Usually wins ([ITEM study](https://aclanthology.org/2026.acl-long.1171/); [IndicTrans2 paper](https://arxiv.org/abs/2305.16307): beats open/commercial baselines by 4–8 BLEU/chrF++ En→Indic) | Loses to dedicated NMT models outside Hindi/high-resource languages |
+| Fluency / naturalness | Reads stiff, "translated," and drops casual register (conversational fine-tune closed some of that gap: [arXiv 2606.29024](https://arxiv.org/abs/2606.29024)) | Reads more natural; GPT-4o is noted for handling idiom and cultural nuance better than dedicated MT ([listicle survey, treat as vendor-adjacent](https://www.edenai.co/post/best-machine-translation-apis)) |
+| Document/long-context handling | Needs sentence splitting; base models cap at ~200–256 tokens, RoPE variant extends to 2048 ([GitHub](https://github.com/AI4Bharat/IndicTrans2)) | Handles paragraphs/whole documents natively, keeps context across sentences |
+| Consistency / hallucination risk | Low — it's a narrow, constrained decoder, not prone to inventing content | Higher — general LLMs can paraphrase, drop, or add content, over-explain, or refuse; TranslateGemma users report degraded quality past ~2K tokens ([AiCybr](https://aicybr.com/blog/translategemma-guide)) |
+| Hardware | Runs on CPU, ~200M–1B params | Needs a real GPU for 12B+; 4B-class models are noted as noticeably weaker |
+| Cost to run at scale | Very low | Higher — bigger model, more compute per sentence |
+| Real-world, independent evidence | Strong (Bhashini national deployment, Wikipedia MinT, 2 independent human-evaluation studies) | Thin for Hindi specifically — the "Gemma 3 12B is best for low-resource languages" and "GPT-4o leads FLORES-200" claims mostly trace back to vendor benchmarks or SEO comparison sites, not independent human evaluation of Hindi ([example](https://www.hakunamatatatech.com/our-resources/blog/best-llm-for-translation)) |
+
+**Reading it straight:** for Hindi specifically, the one solid independent result (ITEM, ACL 2026) has a general LLM (GPT-4o-mini) edging out IndicTrans2 — but that's a single study, on a 150-sentence FLORES-based set, and it's the *exception* the paper itself calls out (IndicTrans2 wins the other five languages it tested). Everywhere else, "LLMs are better at Hindi" claims trace back to vendor blog posts or marketing-style listicles, not controlled human evaluation. For a fully offline news pipeline, IndicTrans2 is still the lower-risk pick: cheap, predictable, CPU-friendly, and proven at national scale. If you can run a 12B+ GPU model and care more about fluent, context-aware prose than about guaranteed literal fidelity, TranslateGemma-12B/27B is the LLM-side pick worth A/B testing against it — not a generic chat LLM used ad hoc.
+
+---
+
+## IndicTrans3 — what's actually known
+
+IndicTrans3-beta is AI4Bharat's newest release (still labelled **beta**), and it's a real architecture change, not just a version bump:
+
+- **Built on Gemma 3**, not the encoder-decoder Transformer that IndicTrans1/2 used. It's fine-tuned for **document-level** translation rather than sentence-level ([HF model card](https://huggingface.co/ai4bharat/IndicTrans3-beta), [AIM coverage](https://analyticsindiamag.com/ai-news-updates/ai4bharat-launches-indictrans3-for-22-indic-languages/)).
+- **Languages:** 15 Indic languages fully supported, including Hindi, plus 7 more (Bodo, Dogri, Kashmiri, Konkani, Manipuri, Santali, Sindhi) in preliminary support — narrower than IndicTrans2's full 22-language coverage for now.
+- **Inference:** ships with a vLLM-based script for scalable serving, sentence- and document-level modes ([GitHub/HF space](https://huggingface.co/spaces/ai4bharat/IndicTrans3-beta)).
+- **AI4Bharat's own framing:** aims to be "on par with leading global translation models" and plans to release training data ([AIM](https://analyticsindiamag.com/ai-news-updates/ai4bharat-launches-indictrans3-for-22-indic-languages/)).
+
+**What's missing:**
+- **No published chrF/BLEU comparison table** against IndicTrans2, TranslateGemma or Sarvam-Translate was found. Search results repeatedly point back to the same model card and one AIM article; no benchmark numbers surfaced.
+- **No independent human evaluation.** Nothing on Hindi accuracy specifically.
+- One relevant third-party signal: a public Hugging Face comparison space (`nithinshesh/indic-sarvam-translation-compare`) ran a large-scale LLM-judged test (500 documents × 22 languages, two independent judges, ≥75/100 pass bar) and reported that a newer AI4Bharat-side model "clearly beats Sarvam-Translate on every measure" ([HF Space](https://huggingface.co/spaces/nithinshesh/indic-sarvam-translation-compare)). The search excerpts don't unambiguously confirm this run was IndicTrans3 rather than IndicTrans2 — treat this as a **lead to verify**, not a confirmed result, and check the space directly before citing it.
+- Still tagged **beta**. No production deployment (Bhashini, Wikimedia, or otherwise) was found yet — unlike IndicTrans2, which already has a national-scale track record.
+
+**Verdict:** IndicTrans3 is the most promising thing on this list architecturally (a Gemma-3 backbone gets it LLM-level fluency and document context, from the team with the best track record on Indic accuracy). But it is **unproven today** — no independent benchmark, no human evaluation, no production deployment. Worth piloting alongside IndicTrans2, not worth switching to blind.
+
+---
 
 ## The contenders
 
