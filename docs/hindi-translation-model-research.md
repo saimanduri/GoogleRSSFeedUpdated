@@ -212,6 +212,42 @@ This repo has no bundled parallel corpus yet (`feeds/` is empty aside from a pla
 
 ---
 
+## Revised recommendation: GPUs available, large EN–Hindi dataset, need contextual understanding
+
+This changes the answer. With no GPU and a small dataset, IndicTrans2 was the safe default. **With GPUs and a large corpus, and a requirement for context (not just isolated sentence accuracy), IndicTrans2 stops being the right base model** — and a Gemma-3-based LLM becomes the better starting point.
+
+**Why IndicTrans2 is the wrong base now:** it is a **sentence-level** encoder-decoder model. It translates one sentence at a time with no visibility into surrounding sentences, so it cannot resolve cross-sentence pronouns, keep terminology consistent across a paragraph, or use prior context to disambiguate a word. This isn't a training-data problem you can fix by fine-tuning more — it's architectural. A dedicated 2026 benchmark, **IndicDISCO-MT**, was built specifically because sentence-level Indic MT systems fail on discourse phenomena like pronoun resolution and lexical cohesion ([ACL Anthology 2026.eamt-1.15](https://aclanthology.org/2026.eamt-1.15/)). Fine-tuning IndicTrans2 on your data would still inherit that ceiling.
+
+**Recommended base model: `google/translategemma-12b-it` (or `-27b-it` if your GPUs can serve it)**, not vanilla Gemma 3. TranslateGemma is already translation-specialized (two-stage SFT + RL for translation quality, per its own technical report — [alphaXiv](https://www.alphaxiv.org/overview/2601.09012)), so your fine-tune specializes an already-competent translator rather than teaching translation from scratch. It's also the one model in this whole comparison whose own evaluation explicitly measures document-level context — coherence, pronoun/reference consistency, lexical cohesion, cross-sentence adequacy — which is exactly the property you're asking for.
+
+**Second, lower-priority track:** `ai4bharat/IndicTrans3-beta`. It's also Gemma-3-based and built for document-level translation, from the team with the best Indic accuracy track record — but no fine-tuning recipe or independent benchmark exists for it yet (see the IndicTrans3 section above). Worth a parallel pilot, not your primary bet.
+
+### Full fine-tuning vs. LoRA, now that you have the budget
+
+With a large dataset and real GPUs, the calculus flips from the earlier LoRA-only advice:
+- **Full fine-tuning tends to beat LoRA specifically on translation quality** — one comparison found full fine-tuning "consistently outperforms LoRA in reducing perplexity," and that LoRA's parameter savings come with a measurable BLEU cost ([survey, arXiv 2504.01919](https://arxiv.org/pdf/2504.01919); [Gradient Flow](https://gradientflow.com/lora-or-full-fine-tuning/)). Full fine-tuning is the better choice "when accuracy is paramount" and you have a large domain-relevant dataset.
+- **Practical middle ground:** if 27B full fine-tuning doesn't fit your GPU memory, start with a high-rank LoRA (or QLoRA) run on the 12B or 27B model as a fast, cheap first pass, then decide whether a full fine-tune is worth the extra compute based on how close LoRA gets you. Don't default to LoRA just because it's cheaper — with your data size, it's the fallback, not the first choice.
+
+### Making the fine-tune actually contextual
+
+Feeding isolated (English sentence → Hindi sentence) pairs, even a huge number of them, will **not** teach the model to use context — that has to be built into how you construct training examples:
+
+1. **Keep document/article boundaries in your data.** Since your source is news articles, group sentence pairs back into their original article order rather than shuffling them into a flat sentence-pair list. If your current dataset is already a flat list with no article grouping, that's the first gap to close — contextual training needs to know which sentences belonged together.
+2. **Train on concatenated windows, not single sentences.** The standard, well-validated approach: prepend the preceding N sentences (2–4 is typical) to both the source and target side, with a clear separator, and train the model to translate the *last* sentence in that window correctly given what came before ([survey on document-level NMT](https://arxiv.org/pdf/1912.08494)). This "context concatenation" method is a strong baseline and works especially well precisely in the high-resource setting you're in.
+3. **Vary the window size during training** (some examples with 1 sentence of context, some with 3–4) so the model doesn't overfit to one fixed context length and stays robust at inference when context is shorter (e.g. the first sentence of an article).
+4. **Evaluate discourse quality directly, not just BLEU/chrF.** Standard sentence-level metrics don't reward correct pronoun resolution or consistent terminology across a document — that's the whole reason IndicDISCO-MT exists. Build (or reuse, if licensing allows) a small discourse-focused eval set: same entity referred to across sentences, ambiguous pronouns, repeated terms that must stay consistent, and check those specifically, alongside your usual native-speaker blind test.
+5. **Named entities and numbers stay your other priority** — same as before, and doubly important in a context-aware setting where an entity introduced in sentence 1 needs to be referred to consistently in sentence 3.
+
+### Revised path, in order
+
+1. Prep the data: verify/rebuild article-level grouping, build concatenated-context training examples, hold out both a generic-domain eval set and a discourse-focused eval set.
+2. Fine-tune `translategemma-12b-it` first (cheaper to iterate on than 27B) — try LoRA/QLoRA as a fast first pass, then full fine-tune if your GPU budget supports it and LoRA leaves quality on the table.
+3. In parallel, pilot `IndicTrans3-beta` on the same data once you can adapt your pipeline to whatever fine-tuning path AI4Bharat documents for it.
+4. Scale to 27B only if 12B's fluency/context handling is the bottleneck, not accuracy.
+5. Run the same native-speaker blind test as before, but score both accuracy *and* discourse coherence, against your fine-tuned model, the un-tuned TranslateGemma baseline, and IndicTrans2 as a sentence-level reference point.
+
+---
+
 ## Recommendation for this pipeline
 
 1. **Default:** `ai4bharat/indictrans2-en-indic-dist-200M` on CPU, or `indictrans2-en-indic-1B` if a GPU is available. Pre-process with IndicTransToolkit, split into sentences, and optionally convert to CTranslate2 as Wikimedia does. Headlines and summaries are short, formal news text, which is exactly IndicTrans2's strongest case.
