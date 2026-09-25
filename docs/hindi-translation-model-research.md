@@ -177,6 +177,41 @@ IndicTrans3-beta is AI4Bharat's newest release (still labelled **beta**), and it
 
 ---
 
+## Fine-tuning your own model on your own dataset
+
+If you have (or can build) a parallel English–Hindi corpus of your own news content, fine-tuning beats using any of the above off the shelf — domain-adapted models consistently outperform generic ones, and "adaptation sets… may have thousands of sentence pairs, while training the original model could use millions" ([survey, arXiv 2104.06951](https://arxiv.org/pdf/2104.06951)). Fine-tuning on in-domain data gets a large share of that improvement for a small fraction of the compute of retraining from scratch (same survey).
+
+### Which base model to fine-tune
+
+| | Fine-tune **IndicTrans2** | Fine-tune **IndicTrans3-beta** | Fine-tune **TranslateGemma / Gemma 3** |
+|---|---|---|---|
+| Recommended for you | **Yes — start here** | Only as a second experiment | Only if you have a GPU and want to also try a bigger, more fluent model |
+| Why | Small (200M/1B), MIT-licensed, official LoRA fine-tuning scripts exist, proven base accuracy, cheap to fine-tune and serve | Newer Gemma-3 backbone with document-level translation, same team, best long-term ceiling — but still beta, no fine-tuning recipe published yet | LLM fluency; useful if your target register is more conversational/summary-style, not literal |
+| Tooling | Official scripts in the `IndicTrans2` repo (`huggingface_interface`), tokenizer/preprocessing via **IndicTransToolkit** ([GitHub](https://github.com/ai4bharat/IndicTrans2), [PyPI](https://pypi.org/project/IndicTrans2/)) | No official fine-tuning recipe found yet (beta) | Hugging Face + `SFTTrainer`, or **Unsloth** for faster/cheaper LoRA/QLoRA ([Google guide](https://ai.google.dev/gemma/docs/core/huggingface_text_finetune_qlora), [Unsloth](https://www.firecrawl.dev/blog/gemma-3-fine-tuning-firecrawl-unsloth)) |
+| Proven precedent | Yes — AI4Bharat's own conversational-register adaptation ([arXiv 2606.29024](https://arxiv.org/abs/2606.29024)), and a legal-domain fine-tune, **InLegalTrans-En2Indic-1B** ([HF](https://huggingface.co/law-ai/InLegalTrans-En2Indic-1B)), show this pattern works for narrow, in-domain corpora | None found yet | Common pattern for Gemma generally, not news-translation specific |
+| Hardware to fine-tune | Modest — a single consumer GPU (or even CPU for the 200M model) is enough for LoRA on a few thousand sentence pairs | Unknown, but Gemma-3-based so similar to Gemma below | Needs a GPU; QLoRA (4-bit) cuts memory sharply and is the standard approach |
+| Risk | Low — LoRA freezes the base model, so you can't easily break its general behavior; the base is already strong on news-style text | Medium — beta model, no track record | Catastrophic forgetting / drifting off literal translation if not careful; needs a held-out generic-domain eval set to catch regressions |
+
+**My recommendation: fine-tune `ai4bharat/indictrans2-en-indic-1B` (or the 200M distilled model if you need CPU-only serving) with LoRA on your own headline/summary corpus.** It's the lowest-risk, cheapest, best-precedented path, and it directly targets your actual use case (short, formal news text) rather than a general-purpose model you then have to constrain.
+
+Treat **IndicTrans3-beta** and **TranslateGemma** as a parallel, lower-priority experiment once the IndicTrans2 fine-tune is working — same blind-test methodology, not a replacement for it.
+
+### How to build the dataset from this repo
+
+This repo has no bundled parallel corpus yet (`feeds/` is empty aside from a placeholder). To get a fine-tuning set:
+
+1. **Collect a bilingual pool.** You need English source text paired with a *human-quality* Hindi translation, not machine output, or the fine-tune will just learn to imitate whichever MT engine you used. Sources that work well for a Hindi-news domain adaptation:
+   - Hindi-language news outlets that also publish (or are translated from) English wire copy, if you can license/scrape them appropriately.
+   - Public corpora as a base to mix in: **BPCC** (the corpus IndicTrans2 itself was trained on, ~230M pairs, [Bhashini](https://static.pib.gov.in/WriteReadData/specificdocs/documents/2022/aug/doc202282696201.pdf)), and **Samanantar** ([arXiv 2104.05596](https://arxiv.org/pdf/2104.05596)), so the fine-tune doesn't overfit to a tiny custom set and forget general Hindi.
+   - A small held-out human-reviewed set of your *own* actual headlines, even a few hundred pairs, matters more than volume for domain match.
+2. **Target size:** a few thousand in-domain sentence pairs is a realistic, useful starting point per the domain-adaptation literature above — you don't need millions. More helps, but returns diminish quickly once the register/vocabulary is covered.
+3. **Use experience replay.** Mix a slice of general-domain data (BPCC/Samanantar) back into training alongside your in-domain set, the same technique AI4Bharat used for conversational adaptation ([arXiv 2606.29024](https://arxiv.org/abs/2606.29024)). This is what prevents the model from forgetting general Hindi while it specializes on your headlines.
+4. **Fine-tune with LoRA**, not full fine-tuning, given the small dataset size — it's cheaper, faster, and much less prone to overfitting/forgetting on a few thousand pairs.
+5. **Evaluate on two sets, not one:** (a) a held-out slice of your own news data, to measure the domain gain, and (b) a generic set like FLORES/IN22, to make sure you haven't regressed general Hindi. Then run the same native-speaker blind test described below against the un-fine-tuned baseline.
+6. **Watch named entities and numbers.** These are the most common failure points in news MT generally, and the easiest to fix with a modest amount of domain-specific data (proper nouns, org names, figures) that a generic corpus won't have covered well.
+
+---
+
 ## Recommendation for this pipeline
 
 1. **Default:** `ai4bharat/indictrans2-en-indic-dist-200M` on CPU, or `indictrans2-en-indic-1B` if a GPU is available. Pre-process with IndicTransToolkit, split into sentences, and optionally convert to CTranslate2 as Wikimedia does. Headlines and summaries are short, formal news text, which is exactly IndicTrans2's strongest case.
