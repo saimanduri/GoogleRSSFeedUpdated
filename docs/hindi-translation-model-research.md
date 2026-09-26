@@ -20,7 +20,7 @@
 | 6 | — | Natural, institutional-register Hindi |
 | Constraint | Offline | **On-premise only.** Confidential data must not go to cloud GPUs or hosted APIs |
 
-**Direction.** English→Hindi is the primary direction. Hindi→English is secondary and should be confirmed as in scope before building evaluation sets for it.
+**Direction.** **Both directions are in scope (confirmed): English→Hindi and Hindi→English.** One LLM-based model can serve both, with the direction stated in the prompt (see §12).
 
 **Hardware.** One RTX 5090 (32 GB) on-premise.
 
@@ -314,3 +314,46 @@ For legal and regulatory subsets, use two qualified reviewers.
 - **Licences and model cards** (Gemma Terms of Use, IndicTrans3-beta, Sarvam) must be rechecked immediately before selection.
 - **Dataset counts** should always distinguish documents, segments, tokens and unique content.
 - **Timeline estimates** (Phase A: 6–10 weeks) are planning assumptions, not measurements.
+
+---
+
+## 12. Implementation plan for a one-person team using Claude Code
+
+### 12.1 Both directions with one model
+- TranslateGemma and IndicTrans3 are prompt-based, so **one fine-tuned model can translate both ways**. The prompt says which direction to translate.
+- **Each parallel pair gives two training examples** (EN→HI and HI→EN), which doubles the training data for free.
+- IndicTrans2 has separate models per direction (`en-indic`, `indic-en`). It stays in the benchmark, but would mean maintaining two models.
+- **Build evaluation sets for each direction separately.** Most official RBI Hindi text is translated *from* English, which gives it a translated style. So the Hindi→English test set should also include some Hindi-original text, such as Hindi press releases or speeches, where available.
+
+### 12.2 How to use the existing ~1 lakh pairs
+
+| Part of the dataset | Where it goes |
+|---|---|
+| Single words and short phrases | **Terminology store**, merged with the RBI Banking Glossary. Word lists alone teach a model little context; as looked-up terms they are very effective. |
+| Sentences | Training data, tiered by provenance (§6.2) |
+| Paragraphs | Training data **and** context examples, split into sentences with the paragraph kept as context |
+| Anything machine-translated | Tier Q2 at most; or used only for terminology mining |
+
+### 12.3 Role of a locally hosted IndicTrans3 (revised)
+- **Do not use it as the main source of training data.** Translating RBI English documents with IndicTrans3 and training on the output teaches the model IndicTrans3's mistakes. It cannot learn to be better than its teacher on those examples.
+- **Better main source:** for the many documents RBI publishes in both languages, collect both versions and *align* them. That produces human-translated pairs (tier Q4–Q5).
+- **Good uses for IndicTrans3:**
+  - an **alignment helper**, translating one side so that matching sentences can be found reliably;
+  - a **candidate model** in the benchmark;
+  - **back-translation** of documents that exist in only one language, tagged `synthetic: true` and capped as a share of training data;
+  - a **second opinion**: segments where it disagrees with other models are sent to human review first.
+
+### 12.4 What Claude Code can and cannot do
+
+| Claude Code can write and run | Needs a person |
+|---|---|
+| Scripts that download RBI English and Hindi documents and parse PDF/HTML | Confirming RBI website terms of use and internal permission to use the data |
+| Document matching and sentence alignment (multilingual embeddings) | Spot-checking alignment quality on a sample |
+| Cleaning, deduplication, number/date checks, train/test split by document | Deciding the provenance tier of the existing 1 lakh pairs |
+| Terminology store and glossary lookup | Approving disputed terms |
+| Benchmark harness, QLoRA training scripts, evaluation scripts | Blind human rating of the evaluation set (Hindi reviewer; legal reviewer for high-risk subsets) |
+| Local translation server with validators | Go/no-go decisions and release approval |
+
+**Where to run it.** Claude Code has to run **on the RTX 5090 machine** (the Claude Code CLI installed locally), because training and inference need the GPU and the RBI website must be reachable.
+
+**Confidentiality.** The code runs locally, but any file content Claude Code *reads* is sent to Anthropic's API as part of the conversation. For confidential RBI material, keep real data out of Claude's context: let it write and test code on public or sample data, and run the finished scripts yourself on confidential files. Check this against RBI's IT and data policy before starting.
