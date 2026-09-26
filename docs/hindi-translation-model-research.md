@@ -1,151 +1,154 @@
-# Open-source models for Hindi and Indian-language translation (September 2026)
+# Hindi / Indic Translation Model Research — Consolidated Findings & Final Recommendation
 
-**Question:** Which open-source model translates Indian languages, especially Hindi, most accurately today? The answer should rest on real-world use and human evaluation, not on leaderboards or vendor pages.
+*Consolidated: 26 Sep 2026. This file supersedes the incremental drafts written earlier in this research thread — it is the single reference going forward.*
 
-**Context for this repo:** The pipeline collects Google News RSS items (headlines and short summaries), often in English, and is built to run offline. So the target is mostly **English → Hindi news text**, run locally, ideally on modest hardware.
+## 1. Objective
 
----
+Build a translation capability for this pipeline's English-language Google News RSS content into Hindi (and, where reusable, other Indian languages), that:
+- Understands **context**, not just isolated sentences — resolves pronouns, keeps terminology and named entities consistent across a document, not just per-sentence adequacy.
+- Is built by **fine-tuning an open-source base model on a proprietary dataset** (a large existing English–Hindi parallel corpus), not by calling a hosted API.
+- Runs on **available hardware: one NVIDIA RTX 5090 (32GB GDDR7, 1.79TB/s bandwidth)**.
 
-## TL;DR
-
-| Rank | Model | Use it when | Evidence quality |
-|---|---|---|---|
-| **1 (default)** | **AI4Bharat IndicTrans2** (`indictrans2-en-indic-1B`, or `-dist-200M` for CPU) | Accurate, predictable English→Hindi on CPU or a small GPU, offline | **Strongest.** Runs in production at national scale, and independent human evaluations back it |
-| 2 | **Google TranslateGemma 12B / 27B** | You have a GPU and want more natural, context-aware Hindi for whole paragraphs | Good automatic metrics and positive but anecdotal user reports. No published human evaluation for Hindi |
-| 3 | **Sarvam-Translate** (Gemma-3-4B fine-tune) | Document-level or formatted text (markdown, lists) across 22 languages | Expert human evaluation, but run by the vendor. Users report repetition loops |
-| Watch | **Bodhan AI Indic-Translate** (Sept 2026), **IndicTrans3-beta** (Gemma-3 backbone, document-level) | Worth testing, but not trusting yet | No published benchmark table or human evaluation found for either. Still beta/"in progress" |
-| Avoid | NLLB-200, and general chat LLMs used as translators | — | See below |
-| Not comparable | **Process9 Mox (MoxVeda / MoxWave / MoxNMT)** | You're paying for a managed, human-reviewed website or app localization service | **Weak for accuracy.** It's proprietary and not open source, with no independent benchmark. Its adoption is real, but the evidence is vendor-published (see [Process9 section](#comparison-with-process9-mox-moxveda--moxwave--moxnmt)) |
-
-**Bottom line:** For accurate, low-risk Hindi translation today, **IndicTrans2 is still the best-proven open model.** It is not the most fluent. LLM-based translators, especially TranslateGemma-27B, often read more naturally. But IndicTrans2 has the most real-world proof: it runs in production at national scale, and independent human evaluators preferred it to other open systems. The newer LLM-based models have not yet shown that kind of accuracy for Hindi in independent tests.
+Everything below is organized around getting to a final, defensible answer for that objective — model selection, dataset construction, training method, and evaluation — while keeping the full evidence trail (including scenarios that don't apply to this exact setup, for reference if constraints change).
 
 ---
 
-## Why IndicTrans2 wins on real-world evidence
+## 2. Final recommendation (read this first)
 
-1. **It runs in production at national scale.** India's government platform **Bhashini** uses IndicTrans2 in production. The Prime Minister's Independence Day speech (15 Aug 2026) was live-translated from Hindi into all 22 scheduled languages with IndicTrans2 ([TechTimes](https://www.techtimes.com/articles/324582/20260815/india-deploys-homegrown-ai-red-fort-pledges-ai-training-ten-million-youth.htm)).
-2. **Wikipedia editors use it.** Wikimedia's **MinT** service serves IndicTrans2 to Content Translation users for Indic languages. It runs through CTranslate2 on CPU, with no GPU ([MediaWiki: MinT](https://www.mediawiki.org/wiki/MinT)). Editors post-edit this output every day, which makes it one of the few real-world feedback loops for open MT.
-3. **Independent human evaluation.** A study scored translations by hand on 11 quality factors (0–4 scale). It found **IndicTrans2 better than Meta's NLLB** for English–Hindi ([Rupkatha / Springer](https://link.springer.com/chapter/10.1007/978-3-031-91331-0_7)).
-4. **Independent English–Hindi comparison.** On an 18k-sentence corpus plus government FAQ text, **Google Translate ranked first and IndicTrans2 a close second.** NLLB-200 and OPUS-MT trailed ([arXiv 2505.19604](https://arxiv.org/abs/2505.19604)).
-5. **Permissive licence (MIT)** and small sizes: 1B, or a 200M distilled model. It is easy to run offline.
-
-**Known weaknesses, from practitioners and follow-up papers:**
-
-- **Stiff, formal register.** It sounds wooden on casual or conversational text. A 2026 paper fine-tuned it for conversation and gained +6.2 chrF on average ([arXiv 2606.29024](https://arxiv.org/abs/2606.29024)). Formal register is fine for news.
-- **Sentence-level model.** The original models truncate input at about 200–256 tokens. You must split text into sentences. RoPE long-context variants (up to 2048 tokens) came out in January 2025 ([GitHub](https://github.com/AI4Bharat/IndicTrans2)). Users have asked how to batch whole documents ([issue #58](https://github.com/AI4Bharat/IndicTrans2/issues/58)).
-- **Hindi is where LLMs are catching up.** In the ACL 2026 *ITEM* study, **GPT-4o-mini beat IndicTrans2 for Hindi**, while IndicTrans2 won in most other Indian languages ([ACL Anthology](https://aclanthology.org/2026.acl-long.1171/)). Hindi has so much training data that large LLMs now match or beat specialised MT models on it. This is why TranslateGemma-27B is a real contender for Hindi specifically.
-
----
-
-## IndicTrans2 (dedicated NMT) vs. a best-in-class LLM (Gemma / GPT-4o-class)
-
-This is the real fork in the road: a small, purpose-built translation model vs. a general-purpose LLM used as a translator. Evidence is thinner than either side's own marketing suggests, but here's what independent sources show.
-
-| | IndicTrans2 (dedicated NMT) | Gemma 3/4-class or GPT-4o-class LLM |
+| Decision | Recommendation | Why |
 |---|---|---|
-| What it is | 1B (or 200M) encoder-decoder, trained only to translate | 4B–400B general model, translating via instructions |
-| Hindi accuracy, independent test | Close 2nd to Google Translate, ahead of NLLB/OPUS ([arXiv 2505.19604](https://arxiv.org/abs/2505.19604)) | In the ACL 2026 **ITEM** study, **GPT-4o-mini beat IndicTrans2 specifically on Hindi** — the one language in that 6-language study where the dedicated model lost ([ACL Anthology](https://aclanthology.org/2026.acl-long.1171/)) |
-| Other Indic languages | Usually wins ([ITEM study](https://aclanthology.org/2026.acl-long.1171/); [IndicTrans2 paper](https://arxiv.org/abs/2305.16307): beats open/commercial baselines by 4–8 BLEU/chrF++ En→Indic) | Loses to dedicated NMT models outside Hindi/high-resource languages |
-| Fluency / naturalness | Reads stiff, "translated," and drops casual register (conversational fine-tune closed some of that gap: [arXiv 2606.29024](https://arxiv.org/abs/2606.29024)) | Reads more natural; GPT-4o is noted for handling idiom and cultural nuance better than dedicated MT ([listicle survey, treat as vendor-adjacent](https://www.edenai.co/post/best-machine-translation-apis)) |
-| Document/long-context handling | Needs sentence splitting; base models cap at ~200–256 tokens, RoPE variant extends to 2048 ([GitHub](https://github.com/AI4Bharat/IndicTrans2)) | Handles paragraphs/whole documents natively, keeps context across sentences |
-| Consistency / hallucination risk | Low — it's a narrow, constrained decoder, not prone to inventing content | Higher — general LLMs can paraphrase, drop, or add content, over-explain, or refuse; TranslateGemma users report degraded quality past ~2K tokens ([AiCybr](https://aicybr.com/blog/translategemma-guide)) |
-| Hardware | Runs on CPU, ~200M–1B params | Needs a real GPU for 12B+; 4B-class models are noted as noticeably weaker |
-| Cost to run at scale | Very low | Higher — bigger model, more compute per sentence |
-| Real-world, independent evidence | Strong (Bhashini national deployment, Wikipedia MinT, 2 independent human-evaluation studies) | Thin for Hindi specifically — the "Gemma 3 12B is best for low-resource languages" and "GPT-4o leads FLORES-200" claims mostly trace back to vendor benchmarks or SEO comparison sites, not independent human evaluation of Hindi ([example](https://www.hakunamatatatech.com/our-resources/blog/best-llm-for-translation)) |
-
-**Reading it straight:** for Hindi specifically, the one solid independent result (ITEM, ACL 2026) has a general LLM (GPT-4o-mini) edging out IndicTrans2 — but that's a single study, on a 150-sentence FLORES-based set, and it's the *exception* the paper itself calls out (IndicTrans2 wins the other five languages it tested). Everywhere else, "LLMs are better at Hindi" claims trace back to vendor blog posts or marketing-style listicles, not controlled human evaluation. For a fully offline news pipeline, IndicTrans2 is still the lower-risk pick: cheap, predictable, CPU-friendly, and proven at national scale. If you can run a 12B+ GPU model and care more about fluent, context-aware prose than about guaranteed literal fidelity, TranslateGemma-12B/27B is the LLM-side pick worth A/B testing against it — not a generic chat LLM used ad hoc.
+| **Base model** | **`google/translategemma-12b-it`** (Gemma-3 backbone, already translation-specialized) | The only model in this review whose own evaluation explicitly targets document-level context — coherence, pronoun/reference consistency, lexical cohesion, cross-sentence adequacy. IndicTrans2, the otherwise best-proven model, is architecturally sentence-level and cannot do this (see §4.1). |
+| **Training method** | **QLoRA (4-bit)**, not full fine-tuning | On a single 32GB RTX 5090, full fine-tuning a 12B model is tight-to-infeasible once gradients and optimizer state are added; QLoRA fits comfortably and leaves headroom for long context windows (§6). |
+| **Second track (parallel, lower priority)** | `ai4bharat/IndicTrans3-beta` (also Gemma-3-based, document-level) | Best long-term ceiling — from the team with the strongest Indic accuracy track record — but still beta, no published fine-tuning recipe, no independent benchmark yet. Pilot, don't bet on it first. |
+| **Scale-up path** | Try `translategemma-27b-it` + QLoRA on the same card once the 12B pipeline is validated; only consider a full fine-tune (needs 80GB-class or multi-GPU hardware) if 27B QLoRA still leaves quality on the table | Sequencing avoids burning time on the expensive option before the cheap one has told you whether it's worth it |
+| **Data format** | Concatenated multi-sentence **context windows**, not flat isolated sentence pairs | This — not the base model choice — is what actually makes the fine-tune contextual (§5) |
+| **Reference baseline to keep testing against** | `ai4bharat/indictrans2-en-indic-1B` | Still the best-proven *sentence-level* model; useful as a floor to beat, and as a fallback if the LLM route underdelivers |
+| **Not a fit here** | Process9 Mox (closed SaaS), NLLB-200 (documented hallucination, non-commercial licence) | See §4.5, §4.6 |
 
 ---
 
-## IndicTrans3 — what's actually known
+## 3. How we got here (decision path)
 
-IndicTrans3-beta is AI4Bharat's newest release (still labelled **beta**), and it's a real architecture change, not just a version bump:
+The recommendation changed twice over the course of this research, each time because a stated constraint changed. This matters because it explains *why* the final answer differs from "just use the model with the most evidence":
 
-- **Built on Gemma 3**, not the encoder-decoder Transformer that IndicTrans1/2 used. It's fine-tuned for **document-level** translation rather than sentence-level ([HF model card](https://huggingface.co/ai4bharat/IndicTrans3-beta), [AIM coverage](https://analyticsindiamag.com/ai-news-updates/ai4bharat-launches-indictrans3-for-22-indic-languages/)).
-- **Languages:** 15 Indic languages fully supported, including Hindi, plus 7 more (Bodo, Dogri, Kashmiri, Konkani, Manipuri, Santali, Sindhi) in preliminary support — narrower than IndicTrans2's full 22-language coverage for now.
-- **Inference:** ships with a vLLM-based script for scalable serving, sentence- and document-level modes ([GitHub/HF space](https://huggingface.co/spaces/ai4bharat/IndicTrans3-beta)).
-- **AI4Bharat's own framing:** aims to be "on par with leading global translation models" and plans to release training data ([AIM](https://analyticsindiamag.com/ai-news-updates/ai4bharat-launches-indictrans3-for-22-indic-languages/)).
+1. **No stated GPU, no stated dataset, no stated context requirement** → **IndicTrans2** was the right default: cheapest, CPU-capable, most independently-verified accuracy for Hindi.
+2. **GPU + large dataset available, but still asking generically about fine-tuning** → IndicTrans2 was still the lowest-risk *starting point* for fine-tuning, with TranslateGemma/IndicTrans3 as a secondary track, because LoRA + small-to-medium data is IndicTrans2's proven use case (conversational and legal-domain adaptations exist).
+3. **Explicit requirement: contextual understanding, not just sentence accuracy** → this ruled out IndicTrans2 as the *base* to build on, regardless of dataset size or hardware, because it is architecturally sentence-level. This pushed the recommendation to a Gemma-3-based LLM (TranslateGemma or IndicTrans3-beta).
+4. **Explicit hardware: one RTX 5090 (32GB)** → this ruled out full fine-tuning as the default method (viable in the abstract "large dataset + GPUs" scenario, but not on one 32GB consumer card) and settled the method on QLoRA.
 
-**What's missing:**
-- **No published chrF/BLEU comparison table** against IndicTrans2, TranslateGemma or Sarvam-Translate was found. Search results repeatedly point back to the same model card and one AIM article; no benchmark numbers surfaced.
-- **No independent human evaluation.** Nothing on Hindi accuracy specifically.
-- One relevant third-party signal: a public Hugging Face comparison space (`nithinshesh/indic-sarvam-translation-compare`) ran a large-scale LLM-judged test (500 documents × 22 languages, two independent judges, ≥75/100 pass bar) and reported that a newer AI4Bharat-side model "clearly beats Sarvam-Translate on every measure" ([HF Space](https://huggingface.co/spaces/nithinshesh/indic-sarvam-translation-compare)). The search excerpts don't unambiguously confirm this run was IndicTrans3 rather than IndicTrans2 — treat this as a **lead to verify**, not a confirmed result, and check the space directly before citing it.
-- Still tagged **beta**. No production deployment (Bhashini, Wikimedia, or otherwise) was found yet — unlike IndicTrans2, which already has a national-scale track record.
-
-**Verdict:** IndicTrans3 is the most promising thing on this list architecturally (a Gemma-3 backbone gets it LLM-level fluency and document context, from the team with the best track record on Indic accuracy). But it is **unproven today** — no independent benchmark, no human evaluation, no production deployment. Worth piloting alongside IndicTrans2, not worth switching to blind.
+Each step is evidenced below; §2 is the answer to all four constraints held simultaneously, which is your actual situation.
 
 ---
 
-## The contenders
+## 4. Model landscape reviewed
 
-### TranslateGemma (Google, Jan 2026; 4B / 12B / 27B)
-- Fine-tuned from Gemma 3 for translation across 55 languages, including Hindi. The 12B model beats the Gemma 3 27B baseline on MetricX ([Google blog](https://blog.google/innovation-and-ai/technology/developers-tools/translategemma/)).
-- **Gap:** the tech report's professional human evaluation (MQM) covered 10 language pairs. That included **Marathi but not Hindi** ([report review](https://www.themoonlight.io/en/review/translategemma-technical-report)). For Hindi, the only evidence is automatic metrics plus community reports.
-- **User feedback** (Ollama and Obsidian users): translations are called "outstanding compared to any other offline model." Users also say **the 4B model is noticeably worse, so use 12B or 27B**. Quality drops past about 2K tokens of context ([Medium demo](https://medium.com/free-or-open-source-software/demo-translategemma-ollama-obsidian-55-languages-offline-ai-powered-translation-global-indian-14ae927d8aa3), [AiCybr guide](https://aicybr.com/blog/translategemma-guide)).
-- Easy to run: `ollama run translategemma:27b`.
+### 4.1 Why IndicTrans2 — despite being the best-proven model — is not the base to fine-tune here
 
-### Sarvam-Translate (Sarvam AI, Jun 2025; Gemma-3-4B fine-tune)
-- Sarvam's own blind evaluation with professional translators rated it **significantly better than Gemma3-27B, Llama-4 Scout and Llama-3.1-405B** ([Sarvam blog](https://www.sarvam.ai/blogs/sarvam-translate)). The evaluation was expert-run, but it was done by the vendor.
-- **Real-world complaints:** output collapses into repeated tokens or gibberish on some inputs ([HF discussion #7](https://huggingface.co/sarvamai/sarvam-translate/discussions/7), [#13](https://huggingface.co/sarvamai/sarvam-translate/discussions/13)). One hands-on reviewer found stiff, literal renderings of idioms (in Kannada) ([Thejesh GN](https://thejeshgn.com/2025/06/10/first-impressions-of-sarvam-indic-translate-model/)). The chat template must be called with `add_generation_prompt=True`, or quality suffers.
-- Strength: document-level input with preserved formatting.
-- Check the licence on the model card before commercial use.
+**The case for it, generally:**
+- Runs in production at national scale: India's **Bhashini** platform used it to live-translate the PM's Independence Day speech into 22 languages (Aug 2026) ([TechTimes](https://www.techtimes.com/articles/324582/20260815/india-deploys-homegrown-ai-red-fort-pledges-ai-training-ten-million-youth.htm)).
+- Serves Wikipedia editors daily via Wikimedia's **MinT** service, on CPU, no GPU needed ([MediaWiki](https://www.mediawiki.org/wiki/MinT)).
+- Independent human evaluation (11-factor scale) found it **better than Meta's NLLB** for English–Hindi ([Springer](https://link.springer.com/chapter/10.1007/978-3-031-91331-0_7)).
+- On an 18k-sentence corpus + government FAQ text, it came a **close 2nd to Google Translate**, ahead of NLLB-200 and OPUS-MT ([arXiv 2505.19604](https://arxiv.org/abs/2505.19604)).
+- MIT-licensed, 200M/1B parameter sizes, runs on CPU.
 
-### Bodhan AI Indic-Translate (Bodhan AI + AI4Bharat + NVIDIA, Sept 2026)
-- On Bodhan's **in-house** document test it scores 58.97 dBLEU, against 47.44 for Sarvam-Translate and 31.93 for IndicTrans2-1B. **Human evaluation is still in progress**, and the model is under a month old ([HF](https://huggingface.co/bodhan-ai/indic-translate), [Analytics Vidhya](https://www.analyticsvidhya.com/blog/2026/09/bodhan-ai-indic-models/)). Promising: AI4Bharat, the IndicTrans2 team, is involved. But there is no real-world signal yet, so re-check in 2–3 months.
+**Why it's disqualified as the base for *this* objective:** IndicTrans2 is a **sentence-level encoder-decoder**. It translates one sentence at a time with no visibility into neighboring sentences — it cannot resolve a pronoun referring back two sentences, or keep a name/term consistent across a paragraph. This is architectural, not a data problem, so no amount of fine-tuning data fixes it. A dedicated 2026 benchmark, **IndicDISCO-MT**, exists specifically because sentence-level Indic MT systems fail at this ([ACL Anthology](https://aclanthology.org/2026.eamt-1.15/)). Other known weaknesses: stiff/formal register on casual text (closes somewhat with conversational fine-tuning, +6.2 chrF: [arXiv 2606.29024](https://arxiv.org/abs/2606.29024)), and a base 200–256 token sequence cap (RoPE variant extends to 2048: [GitHub](https://github.com/AI4Bharat/IndicTrans2)). Notably, in the one independent multi-language human-evaluation study that included Hindi (ACL 2026 *ITEM*), **GPT-4o-mini beat IndicTrans2 specifically on Hindi** — the only language (of 6) where the dedicated NMT model lost ([ACL Anthology](https://aclanthology.org/2026.acl-long.1171/)). Hindi is high-resource enough that general LLMs are closing the gap.
 
-### IndicTrans3-beta (AI4Bharat)
-- A Gemma-3-based model for document-level translation. It supports 15 languages fully and 7 more in preview ([HF](https://huggingface.co/ai4bharat/IndicTrans3-beta)). It is still labelled beta, with no published human evaluation.
+**Keep it as:** the reference baseline in your evaluations (§7), and the fallback plan if the LLM fine-tuning route underdelivers on accuracy.
 
-### Why not the others
-- **NLLB-200:** Independent studies document hallucination, repetition and omissions ([arXiv 2511.00486](https://arxiv.org/pdf/2511.00486)). It loses to IndicTrans2 in human evaluation. Its licence is **CC-BY-NC**, and Meta calls it a research model, not for production.
-- **General LLMs (Sarvam-30B/105B, Qwen3, Llama, Gemma 4):** SEO "best LLM for Hindi" listicles recommend them, but those lists are not translation evaluations. Independent tests show mixed Indic results. For example, Gemma 4 31B beat Sarvam-30B on a multilingual benchmark in every language ([Medium](https://medium.com/@indiai/india-first-llms-on-indian-languages-sarvam-30b-and-param2-17b-6676b637f3ab)). Users also report Gemma 4 **code-switching into English** on specialised topics ([DEV](https://dev.to/devsaquib/i-tested-gemma-4-and-gpt-4o-mini-on-indian-language-tasks-the-results-surprised-me-19g8)). For pure translation, a dedicated model is cheaper and more predictable.
+### 4.2 TranslateGemma (Google, Jan 2026) — the recommended base
+
+- Fine-tuned from Gemma 3 for translation across 55 languages including Hindi, via a two-stage process: SFT on synthetic + human-translated parallel data, then RL with quality reward models (MetricX-QE, AutoMQM) ([alphaXiv](https://www.alphaxiv.org/overview/2601.09012)). The 12B model beats the Gemma 3 27B baseline on MetricX ([Google blog](https://blog.google/innovation-and-ai/technology/developers-tools/translategemma/)).
+- **Its own evaluation explicitly measures document-level context**: coherence, pronoun/reference consistency, lexical cohesion, cross-sentence adequacy — directly matching this project's requirement.
+- **Evidence gap:** the professional human evaluation (MQM) covered 10 language pairs including Marathi, but **not Hindi** ([report review](https://www.themoonlight.io/en/review/translategemma-technical-report)). For Hindi specifically, the evidence is automatic metrics plus anecdotal community reports, not controlled human evaluation.
+- **User reports:** called "outstanding compared to any other offline model" by Ollama/Obsidian users; the 4B size is noticeably weaker — use 12B or 27B; quality degrades past ~2K tokens of context ([Medium](https://medium.com/free-or-open-source-software/demo-translategemma-ollama-obsidian-55-languages-offline-ai-powered-translation-global-indian-14ae927d8aa3), [AiCybr](https://aicybr.com/blog/translategemma-guide)).
+
+**Bottom line:** best available combination of (a) already translation-specialized, (b) architecturally built for document context, (c) open weights, (d) fits a single 32GB GPU with QLoRA. Its main weakness is that nobody has independently verified Hindi quality with human judges yet — which is exactly what your own blind test (§7) needs to establish before you commit further.
+
+### 4.3 IndicTrans3-beta (AI4Bharat) — promising, not yet provable
+
+- A real architecture change, not a version bump: built on **Gemma 3**, fine-tuned for **document-level** translation (vs. IndicTrans2's sentence-level) ([HF](https://huggingface.co/ai4bharat/IndicTrans3-beta), [AIM](https://analyticsindiamag.com/ai-news-updates/ai4bharat-launches-indictrans3-for-22-indic-languages/)).
+- Covers 15 Indic languages fully (including Hindi) plus 7 more in preview — narrower than IndicTrans2's full 22.
+- Ships a vLLM-based inference script for sentence- and document-level serving.
+- **What's missing:** no published chrF/BLEU comparison table against IndicTrans2/TranslateGemma/Sarvam, no independent human evaluation, no fine-tuning recipe, no production deployment yet — still labelled beta. One third-party HF comparison space reportedly showed a "newer AI4Bharat model" beating Sarvam-Translate on a large LLM-judged test, but the source doesn't unambiguously confirm this was IndicTrans3 rather than IndicTrans2 — treat as an unverified lead ([HF Space](https://huggingface.co/spaces/nithinshesh/indic-sarvam-translation-compare)).
+
+**Bottom line:** architecturally, this is arguably the best long-term fit (Gemma-3 + document-level + AI4Bharat's Indic-accuracy pedigree) — but with zero independent verification today, it's a parallel pilot, not the primary bet.
+
+### 4.4 Sarvam-Translate, Bodhan Indic-Translate, NLLB-200 — considered and set aside
+
+| Model | Verdict | Why |
+|---|---|---|
+| **Sarvam-Translate** (Gemma-3-4B fine-tune) | Try as a reference point, not a base | Vendor's own expert evaluation claims it beats Gemma3-27B/Llama-4/Llama-3.1-405B ([Sarvam blog](https://www.sarvam.ai/blogs/sarvam-translate)), but users report output collapsing into repetition/gibberish on some inputs ([HF #7](https://huggingface.co/sarvamai/sarvam-translate/discussions/7), [#13](https://huggingface.co/sarvamai/sarvam-translate/discussions/13)) and stiff, literal idiom handling ([Thejesh GN](https://thejeshgn.com/2025/06/10/first-impressions-of-sarvam-indic-translate-model/)) |
+| **Bodhan AI Indic-Translate** (Sept 2026) | Watch, re-check in 2–3 months | Claims 58.97 dBLEU vs. Sarvam's 47.44 and IndicTrans2's 31.93 on an **in-house, vendor-run** test ([HF](https://huggingface.co/bodhan-ai/indic-translate)); human evaluation "in progress"; under a month old with no independent evidence yet |
+| **NLLB-200** (Meta) | Avoid | Independent studies document hallucination, repetition, omissions ([arXiv 2511.00486](https://arxiv.org/pdf/2511.00486)); loses to IndicTrans2 in human evaluation; **CC-BY-NC licence** — research use only, not for a production fine-tune |
+| **General chat LLMs used ad hoc** (Sarvam-30B/105B, Qwen3, Llama, Gemma 4) | Avoid as translators | Mixed, inconsistent Indic results across models; e.g. Gemma 4 31B beat Sarvam-30B on every language in one benchmark ([Medium](https://medium.com/@indiai/india-first-llms-on-indian-languages-sarvam-30b-and-param2-17b-6676b637f3ab)), while also reported to code-switch into English on specialised topics ([DEV](https://dev.to/devsaquib/i-tested-gemma-4-and-gpt-4o-mini-on-indian-language-tasks-the-results-surprised-me-19g8)) — a dedicated translation model is cheaper and more predictable than an undirected chat LLM |
+
+### 4.5 Process9 Mox (MoxVeda / MoxWave / MoxNMT) — not comparable, not a fit
+
+Process9 sells a **closed, subscription SaaS** for website/app localization (MoxVeda), backed by a proprietary engine (MoxNMT) with human-in-the-loop review, translation memory, and glossaries ([MoxVeda](https://process9.com/mox-veda/), [Mox vs Bhashini](https://process9.com/mox-vs-bhashini/)).
+
+- **Accuracy claim:** "95%+ accuracy in Hindi vs ~80% generic tools" — method and test set undisclosed, so it can't be checked against any benchmark used elsewhere ([Process9 FAQ](https://process9.com/faq-translation-tools-indian-languages/)).
+- **Independent evidence: none found** — no academic benchmark appearance, no G2/Capterra/Reddit reviews (positive or negative).
+- **Real customers are real** (Axis Bank, Tata 1mg, Startup India, Paytm, PolicyBazaar), but every quote and metric is vendor-published, and the numbers measure business engagement (session counts), not translation accuracy — with human reviewers in the loop doing real work on top of the raw MT output.
+- **Not open source**, hosted (sends your content to a third party), and not fine-tunable — disqualified for this objective on every count.
+
+### 4.6 Full model comparison table
+
+| | IndicTrans2 | TranslateGemma 12B/27B | IndicTrans3-beta | Sarvam-Translate | Bodhan Indic-Translate | NLLB-200 | Process9 Mox |
+|---|---|---|---|---|---|---|---|
+| Architecture | Sentence-level encoder-decoder | Gemma-3, document-level | Gemma-3, document-level | Gemma-3-4B fine-tune | Unknown (Gemma-4-based per some listings) | Encoder-decoder, sentence-level | Proprietary, undisclosed |
+| Licence | MIT | Gemma terms | Gemma terms (beta) | Check card | Check card (new) | CC-BY-NC (non-commercial) | Closed SaaS |
+| Contextual/discourse capable | ❌ No | ✅ Designed for it | ✅ Designed for it | Partial (document input, but repetition issues) | Unknown | ❌ No | Unknown |
+| Independent human evaluation (Hindi) | ✅ Beats NLLB; close 2nd to Google | ❌ MQM covered Marathi, not Hindi | ❌ None | ❌ Vendor-run only | ❌ "In progress" | ✅ Loses to IndicTrans2 | ❌ None |
+| Real-world deployment | ✅ National scale (Bhashini), Wikipedia | Hobbyist/dev use | None yet | Sarvam API users | None (1 month old) | Wikipedia (other langs) | Axis Bank, Tata 1mg, Paytm, etc. (vendor-published) |
+| Fine-tuning tooling | ✅ Official LoRA scripts + IndicTransToolkit | HF `SFTTrainer` / Unsloth QLoRA guides | ❌ None published | Unknown | Unknown | Unknown | N/A (closed) |
+| Fits a single RTX 5090 | ✅ Even CPU-only | ✅ QLoRA yes, full FT tight/no | Presumed similar to Gemma | ✅ Likely (4B) | Needs vLLM/TensorRT | ✅ | N/A (hosted) |
+| **Fit for this objective** | Reference baseline only — wrong architecture for "contextual" | **Primary recommendation** | Secondary pilot | Reference point | Re-check later | Avoid | Not applicable |
 
 ---
 
-## Comparison with Process9 Mox (MoxVeda / MoxWave / MoxNMT)
+## 5. Dataset construction: making the fine-tune actually contextual
 
-**What it is.** Process Nine Technologies is a Gurugram localization company, founded in 2009. It had about 74 staff in Aug 2025 and has raised about $1.13M ([Tracxn](https://tracxn.com/d/companies/process9/__3TYOJxGK4MIefKX83cR_0B4GSVIV6HiLtE6T9DgoATE)). It sells the **Mox suite**:
-- **MoxVeda** is a website and app localization layer. It translates a live site with no code or database changes and keeps it in sync with the English source ([MoxVeda](https://process9.com/mox-veda/)). It is a *platform*, not a model, and "can integrate with any machine translation engine of your choice."
-- **MoxWave** is the translation API ([MoxWave](https://process9.com/mox-wave/)).
-- **MoxNMT** is the proprietary Indic translation engine underneath ([Azure Marketplace sheet](https://catalogartifact.azureedge.net/publicartifacts/processninetechnologiespvtltd1640269656476.mox_nmt_01-c7b98300-c120-485b-b98b-a54f62394d46/Artifacts/Documents/Process9_MoxNMT.pdf)).
-- The suite adds human-in-the-loop review, translation memory, glossaries and style guides. It is ISO 27001 certified ([Mox vs Bhashini](https://process9.com/mox-vs-bhashini/)).
+You have a large EN–Hindi dataset already. The base-model choice above is necessary but **not sufficient** — a Gemma-3-based model fed flat, shuffled (English sentence → Hindi sentence) pairs will not learn to use context any better than IndicTrans2 does. Contextual behavior has to be built into the training data itself:
 
-**It is not open source.** Mox is a closed, subscription SaaS. It is not a like-for-like alternative to IndicTrans2 or TranslateGemma. The fair comparison is with a *commercial service* (Google or Azure Translate plus human post-editing).
+1. **Preserve document/article boundaries.** Group sentence pairs back into their original article order. A flat, shuffled sentence-pair list — which is how most bulk parallel corpora, including scraped ones, are typically distributed — throws away exactly the information needed for context training. This is the first thing to check/fix in your existing dataset.
+2. **Train on concatenated context windows, not single sentences.** Standard, well-validated approach: prepend the preceding 2–4 sentences to both the source and target side (with a clear separator token), and train the model to produce a correct translation of the *last* sentence given that preceding context ([survey, arXiv 1912.08494](https://arxiv.org/pdf/1912.08494)). This "concatenation" method is a strong, simple baseline that works especially well in high-resource settings — which a large dataset gives you.
+3. **Vary the context window length during training** (mix in 1-sentence, 2-sentence, 3–4 sentence windows) so the model stays robust at inference when less context is available — e.g. the first sentence of an article has no prior context at all.
+4. **Keep a slice of general-domain parallel data in the mix** (e.g. BPCC, the corpus IndicTrans2 itself trained on, or Samanantar: [arXiv 2104.05596](https://arxiv.org/pdf/2104.05596)) alongside your in-domain set — "experience replay" — so the model doesn't overfit narrowly to your corpus and lose general Hindi fluency. AI4Bharat used exactly this technique for their own conversational-domain adaptation of IndicTrans2 ([arXiv 2606.29024](https://arxiv.org/abs/2606.29024)).
+5. **Human-quality Hindi only.** If any part of your large dataset was itself produced by machine translation (rather than human translation), filter or down-weight it — fine-tuning on MT output teaches the model to imitate that MT engine's errors, not to translate well.
+6. **Named entities and numbers need explicit attention.** These are the most common failure point in news MT generally, and doubly important in a context-aware setup: an entity introduced in sentence 1 must be referred to consistently by sentence 3. If your dataset is thin on proper nouns/organizations relevant to your news domain, consider augmenting with a curated entity list or additional in-domain pairs specifically covering them.
 
-**Accuracy evidence found:**
-- **Vendor claim:** "95%+ accuracy in Hindi, Tamil, Bengali vs ~80% in generic tools," trained on 100M+ Indian-language phrases ([Process9 FAQ](https://process9.com/faq-translation-tools-indian-languages/)). The metric, test set and method are **not disclosed**, so the figure cannot be checked or compared with BLEU, chrF or human-evaluation scores elsewhere.
-- **Independent benchmarks:** **none found.** MoxNMT does not appear in any academic comparison (IN22, FLORES, WMT, the ITEM study) or in any public leaderboard. The English–Hindi comparison studies cited above tested Google, IndicTrans2, NLLB, OPUS-MT, Bing and Anuvad, not Process9.
-- **Independent user reviews:** **none found** on G2, Capterra, Reddit or blogs. No complaints were found either. The public signal is simply thin.
+---
 
-**Real-world adoption, all vendor-published:**
-- **Axis Bank:** Hindi customer-support site went live in Jan 2022 on MoxVeda. Axis said it "carefully evaluated many options… chose Process9" for ease of use, security, speed and quality ([case study](https://process9.com/case-study/axis-bank-case-study/)).
-- **Tata 1mg:** 500k+ healthcare product listings localized into Hindi. Hindi user sessions "more than doubled in a month" ([case study](https://process9.com/case-study/tata-1mg/)).
-- **Startup India:** has used Process9 for about 5 years across 22 Indian and 19 foreign languages; describes "good accuracy" at high volume ([Process9 site](https://process9.com/)).
-- **Paytm, PolicyBazaar, MakeMyTrip, BookMyShow** are named as customers. PolicyBazaar saw 3× interest in bike insurance after selling in Hindi ([YourStory](https://yourstory.com/2020/10/raise-2020-startup-indic-language-interface-paytm-policybazaar)).
-- **How to read this:** long-term, regulated-industry customers (a bank, a pharmacy platform, a government programme) are a meaningful signal that the output is *acceptable in production*. But:
-  - The quotes are vendor-published.
-  - The numbers measure *business engagement* (sessions, interest), not translation accuracy.
-  - The final quality depends heavily on the **human reviewers** in the workflow, not only the machine output.
+## 6. Training method and hardware plan (single RTX 5090, 32GB GDDR7)
 
-**Fit for this repo:** poor. The pipeline is built to be offline or air-gapped, and Mox is a hosted SaaS. No on-premise or offline model release was found. It also costs a subscription and sends feed content to a third party.
+| Target model | Full fine-tune (BF16) | QLoRA (4-bit) |
+|---|---|---|
+| **TranslateGemma-12B** | Tight to infeasible — BF16 weights alone are ~24GB before gradients/optimizer state and a real batch/sequence length are added ([Spheron sizing guide](https://www.spheron.network/blog/gpu-vram-requirements-fine-tune-llm-2026/)) | **Comfortable** — 4-bit weights need well under 16GB, leaving headroom for long context windows and a decent batch size |
+| **TranslateGemma-27B** | **Not feasible** on one 32GB card | **Feasible with care** — reported working with gradient checkpointing, ~4K sequence length on a 32GB card ([ai.rs](https://ai.rs/ai-developer/gemma-4-lora-fine-tuning-rtx-5090)); smaller batch size, slower training |
 
-### Comparison table
+**Recommendation: QLoRA, not full fine-tuning, on this hardware.** The general finding that "full fine-tuning beats LoRA on translation quality" ([arXiv 2504.01919](https://arxiv.org/pdf/2504.01919); [Gradient Flow](https://gradientflow.com/lora-or-full-fine-tuning/)) was measured against *low-rank* LoRA; a well-configured QLoRA run (higher rank, adapters on all linear layers, sufficient training steps over your large dataset) closes most of that gap — and it's the only realistic option for the 27B model on this card regardless.
 
-| | IndicTrans2 | TranslateGemma 12B/27B | Sarvam-Translate | Bodhan Indic-Translate | NLLB-200 | **Process9 Mox** |
-|---|---|---|---|---|---|---|
-| Type | Open model (MIT) | Open weights (Gemma terms) | Open weights (check card) | Open weights (new) | Open, **non-commercial** (CC-BY-NC) | **Proprietary SaaS + human review** |
-| Hindi-specific | Yes (22 langs) | Yes (55 langs) | Yes (22 langs) | Yes (22 langs) | Yes (200 langs) | Yes (22+ langs claimed) |
-| **Independent human evaluation for Hindi** | ✅ Beat NLLB (11-factor human study); close 2nd to Google | ❌ Not for Hindi (MQM covered Marathi) | ❌ Vendor-run only | ❌ "In progress" | ✅ Loses to IndicTrans2 | ❌ None |
-| Vendor accuracy claim | chrF++ on public IN22 (reproducible) | MetricX on WMT24++ (reproducible) | Expert pairwise preference | dBLEU 58.97 on in-house set | chrF on FLORES (reproducible) | "95%+ accuracy" (**method not disclosed**) |
-| Real-world deployment | Bhashini (national, e.g. Red Fort speech 2026); Wikipedia MinT | Hobbyist and dev use (Ollama) | Sarvam API users | None yet (1 month old) | Wikipedia MinT (other langs) | Axis Bank, Tata 1mg, Startup India, Paytm, PolicyBazaar |
-| Is the real-world evidence independent? | ✅ Yes (govt and Wikimedia public records) | Partly (blogs, anecdotal) | Partly (HF discussions) | ❌ | ✅ (academic papers) | ❌ Vendor case studies only |
-| Reported problems | Stiff register; sentence splitting needed; 200–256-token limit (fixed in RoPE variant) | 4B weak; worse past 2K tokens | Repetition/gibberish loops; literal idioms | Unknown | Hallucination, repetition, omissions | None public (no independent reviews found) |
-| Runs offline / on CPU | ✅ Yes (200M on CPU; CTranslate2) | ⚠️ GPU needed for 12B/27B | ⚠️ GPU preferred | ⚠️ GPU (vLLM / TensorRT) | ✅ Yes | ❌ Hosted service |
-| Cost | Free | Free (hardware) | Free (hardware) | Free (hardware) | Free, non-commercial only | Paid subscription |
-| Human-in-the-loop / TM / glossary | DIY | DIY | DIY | DIY | DIY | ✅ Built in |
-| **Verdict for this repo** | **Use (default)** | Use if GPU; A/B vs IndicTrans2 | Try, watch for loops | Re-check in 2–3 months | Avoid | Not suitable (closed, online, unverifiable accuracy); consider only for customer-facing sites needing human review |
+**Sequenced plan:**
+1. **Fine-tune `translategemma-12b-it` with QLoRA first.** It fits comfortably and trains fast, letting you iterate quickly on the context-window data format from §5 — that's where most of the actual quality gain will come from, not from model size.
+2. Once the pipeline and data format are validated, **repeat with `translategemma-27b-it` + QLoRA** on the same card (expect to trade off sequence length/batch size, with gradient checkpointing on) for a direct quality comparison.
+3. **Only pursue a full fine-tune if 27B QLoRA still leaves quality on the table**, and only with different hardware — an 80GB-class card (rented A100/H100) or multiple GPUs. Not something this single 5090 can do; cross that bridge after QLoRA has told you it's worth the jump.
+4. **In parallel**, pilot `IndicTrans3-beta` on the same context-window dataset once you can adapt to whatever fine-tuning approach AI4Bharat documents for it (none published as of this writing — check for updates before starting this track).
+5. Inference: the 12B fine-tune serves comfortably on one 5090; the 27B model will also run, with less headroom for concurrent requests.
 
-### All findings, by source and independence
+---
+
+## 7. Evaluation plan
+
+Run all of the following against: your fine-tuned model, the un-fine-tuned TranslateGemma baseline, and `ai4bharat/indictrans2-en-indic-1B` as the sentence-level reference point.
+
+1. **Native-speaker blind test.** Take ~50 real feed items (or article-length excerpts, to actually test context). Translate with each candidate model, shuffle so the rater doesn't know which model produced which output, and have a native Hindi speaker score adequacy (meaning kept?) and fluency (natural Hindi?) on a 1–5 scale.
+2. **Discourse-specific evaluation, not just BLEU/chrF.** Standard sentence-level metrics don't reward correct pronoun resolution or consistent terminology across a document — that's precisely why IndicDISCO-MT exists. Build (or reuse, if licensing allows) a small discourse-focused eval set: the same entity referred to across sentences, ambiguous pronouns, and repeated terms that must stay consistent — and score those specifically.
+3. **Generic-domain regression check.** Evaluate on a public set like FLORES or IN22 to confirm the fine-tune hasn't regressed general Hindi fluency while specializing on your corpus.
+4. **Named entity / number accuracy spot-check.** Because these are the most common real-world failure point, sample specifically for entities, dates, and figures in the discourse-eval and blind-test sets.
+
+---
+
+## 8. All findings, by source and independence
 
 | # | Finding | Model / vendor | Source | Independent of vendor? |
 |---|---|---|---|---|
@@ -156,122 +159,38 @@ IndicTrans3-beta is AI4Bharat's newest release (still labelled **beta**), and it
 | 5 | GPT-4o-mini beats IndicTrans2 on Hindi; IndicTrans2 wins in most other languages | IndicTrans2 | [ACL 2026 ITEM](https://aclanthology.org/2026.acl-long.1171/) | ✅ |
 | 6 | Stiff on conversational text; +6.2 chrF after adaptation | IndicTrans2 | [arXiv 2606.29024](https://arxiv.org/abs/2606.29024) | ✅ |
 | 7 | 200–256-token limit; long-context RoPE variant Jan 2025; users ask about batching documents | IndicTrans2 | [GitHub](https://github.com/AI4Bharat/IndicTrans2), [#58](https://github.com/AI4Bharat/IndicTrans2/issues/58) | ✅ |
-| 8 | 12B beats Gemma 3 27B on MetricX | TranslateGemma | [Google blog](https://blog.google/innovation-and-ai/technology/developers-tools/translategemma/) | ❌ vendor |
-| 9 | MQM human evaluation covered Marathi, not Hindi | TranslateGemma | [Tech report review](https://www.themoonlight.io/en/review/translategemma-technical-report) | ❌ vendor |
-| 10 | Users: "outstanding vs other offline models"; use 12B/27B, not 4B; worse past 2K tokens | TranslateGemma | [Medium](https://medium.com/free-or-open-source-software/demo-translategemma-ollama-obsidian-55-languages-offline-ai-powered-translation-global-indian-14ae927d8aa3), [AiCybr](https://aicybr.com/blog/translategemma-guide) | ✅ (anecdotal) |
-| 11 | Expert pairwise evaluation: better than Gemma3-27B, Llama-4 Scout, Llama-3.1-405B | Sarvam-Translate | [Sarvam blog](https://www.sarvam.ai/blogs/sarvam-translate) | ❌ vendor |
-| 12 | Output-token repetition / gibberish reported by users | Sarvam-Translate | [HF #7](https://huggingface.co/sarvamai/sarvam-translate/discussions/7), [HF #13](https://huggingface.co/sarvamai/sarvam-translate/discussions/13) | ✅ |
-| 13 | Literal, unnatural idiom rendering (Kannada) | Sarvam-Translate | [Thejesh GN](https://thejeshgn.com/2025/06/10/first-impressions-of-sarvam-indic-translate-model/) | ✅ |
-| 14 | 58.97 dBLEU vs Sarvam 47.44 vs IndicTrans2 31.93 on in-house set; human evaluation pending | Bodhan Indic-Translate | [HF](https://huggingface.co/bodhan-ai/indic-translate), [Analytics Vidhya](https://www.analyticsvidhya.com/blog/2026/09/bodhan-ai-indic-models/) | ❌ vendor |
-| 15 | Gemma-3-based, document-level, still beta | IndicTrans3-beta | [HF](https://huggingface.co/ai4bharat/IndicTrans3-beta) | ❌ vendor |
-| 16 | Hallucination, repetition, omissions; research-only licence | NLLB-200 | [arXiv 2511.00486](https://arxiv.org/pdf/2511.00486), [HF card](https://huggingface.co/facebook/nllb-200-3.3B) | ✅ |
-| 17 | Gemma 4 31B beats Sarvam-30B across Indic languages; Gemma 4 code-switches into English | General LLMs | [Medium](https://medium.com/@indiai/india-first-llms-on-indian-languages-sarvam-30b-and-param2-17b-6676b637f3ab), [DEV](https://dev.to/devsaquib/i-tested-gemma-4-and-gpt-4o-mini-on-indian-language-tasks-the-results-surprised-me-19g8) | ✅ (anecdotal) |
-| 18 | "95%+ accuracy in Hindi vs ~80% generic"; method not disclosed | Process9 MoxNMT | [Process9 FAQ](https://process9.com/faq-translation-tools-indian-languages/) | ❌ vendor |
-| 19 | MoxVeda = website localization layer; works with any MT engine; human-in-the-loop | Process9 MoxVeda | [MoxVeda](https://process9.com/mox-veda/) | ❌ vendor |
-| 20 | Axis Bank Hindi support site live Jan 2022; chose Mox after evaluating options | Process9 | [Case study](https://process9.com/case-study/axis-bank-case-study/) | ❌ vendor-published testimonial |
-| 21 | Tata 1mg: 500k+ products in Hindi; Hindi sessions 2× in a month | Process9 | [Case study](https://process9.com/case-study/tata-1mg/) | ❌ vendor-published |
-| 22 | Startup India: about 5 years of use, "good accuracy" at volume | Process9 | [Process9 site](https://process9.com/) | ❌ vendor-published |
-| 23 | Customers incl. Paytm, PolicyBazaar, MakeMyTrip, BookMyShow; PolicyBazaar 3× interest in Hindi | Process9 | [YourStory](https://yourstory.com/2020/10/raise-2020-startup-indic-language-interface-paytm-policybazaar) | ⚠️ press, based on company interview |
-| 24 | No independent benchmark, academic evaluation or public user review found | Process9 | Searches of academic, G2/Capterra and community sources | — (absence of evidence) |
-| 25 | Small company: about 74 staff, about $1.13M raised | Process9 | [Tracxn](https://tracxn.com/d/companies/process9/__3TYOJxGK4MIefKX83cR_0B4GSVIV6HiLtE6T9DgoATE) | ✅ |
+| 8 | Sentence-level Indic MT fails discourse phenomena (pronoun resolution, lexical cohesion) — dedicated benchmark built to measure this | IndicTrans2 and peers | [ACL Anthology 2026.eamt-1.15](https://aclanthology.org/2026.eamt-1.15/) | ✅ |
+| 9 | 12B beats Gemma 3 27B baseline on MetricX; two-stage SFT+RL training | TranslateGemma | [Google blog](https://blog.google/innovation-and-ai/technology/developers-tools/translategemma/), [alphaXiv](https://www.alphaxiv.org/overview/2601.09012) | ❌ vendor |
+| 10 | MQM human evaluation covered Marathi, not Hindi | TranslateGemma | [Tech report review](https://www.themoonlight.io/en/review/translategemma-technical-report) | ❌ vendor |
+| 11 | Users: "outstanding vs other offline models"; use 12B/27B, not 4B; worse past 2K tokens | TranslateGemma | [Medium](https://medium.com/free-or-open-source-software/demo-translategemma-ollama-obsidian-55-languages-offline-ai-powered-translation-global-indian-14ae927d8aa3), [AiCybr](https://aicybr.com/blog/translategemma-guide) | ✅ (anecdotal) |
+| 12 | Expert pairwise evaluation: better than Gemma3-27B, Llama-4 Scout, Llama-3.1-405B | Sarvam-Translate | [Sarvam blog](https://www.sarvam.ai/blogs/sarvam-translate) | ❌ vendor |
+| 13 | Output-token repetition / gibberish reported by users | Sarvam-Translate | [HF #7](https://huggingface.co/sarvamai/sarvam-translate/discussions/7), [HF #13](https://huggingface.co/sarvamai/sarvam-translate/discussions/13) | ✅ |
+| 14 | Literal, unnatural idiom rendering (Kannada) | Sarvam-Translate | [Thejesh GN](https://thejeshgn.com/2025/06/10/first-impressions-of-sarvam-indic-translate-model/) | ✅ |
+| 15 | 58.97 dBLEU vs Sarvam 47.44 vs IndicTrans2 31.93 on in-house set; human evaluation pending | Bodhan Indic-Translate | [HF](https://huggingface.co/bodhan-ai/indic-translate), [Analytics Vidhya](https://www.analyticsvidhya.com/blog/2026/09/bodhan-ai-indic-models/) | ❌ vendor |
+| 16 | Gemma-3-based, document-level translation, 15+7 languages, still beta, no fine-tuning recipe published | IndicTrans3-beta | [HF](https://huggingface.co/ai4bharat/IndicTrans3-beta), [AIM](https://analyticsindiamag.com/ai-news-updates/ai4bharat-launches-indictrans3-for-22-indic-languages/) | ❌ vendor (AIM coverage is press, largely restating AI4Bharat's framing) |
+| 17 | Unverified: a newer AI4Bharat-side model "clearly beats" Sarvam-Translate on a 500-doc LLM-judged test | IndicTrans3 (unconfirmed) or IndicTrans2 | [HF Space](https://huggingface.co/spaces/nithinshesh/indic-sarvam-translation-compare) | ⚠️ Third-party space, but which model isn't confirmed |
+| 18 | Hallucination, repetition, omissions; research-only licence | NLLB-200 | [arXiv 2511.00486](https://arxiv.org/pdf/2511.00486), [HF card](https://huggingface.co/facebook/nllb-200-3.3B) | ✅ |
+| 19 | Gemma 4 31B beats Sarvam-30B across Indic languages; Gemma 4 code-switches into English | General LLMs | [Medium](https://medium.com/@indiai/india-first-llms-on-indian-languages-sarvam-30b-and-param2-17b-6676b637f3ab), [DEV](https://dev.to/devsaquib/i-tested-gemma-4-and-gpt-4o-mini-on-indian-language-tasks-the-results-surprised-me-19g8) | ✅ (anecdotal) |
+| 20 | "95%+ accuracy in Hindi vs ~80% generic"; method not disclosed | Process9 MoxNMT | [Process9 FAQ](https://process9.com/faq-translation-tools-indian-languages/) | ❌ vendor |
+| 21 | MoxVeda = website localization layer; works with any MT engine; human-in-the-loop | Process9 MoxVeda | [MoxVeda](https://process9.com/mox-veda/) | ❌ vendor |
+| 22 | Axis Bank Hindi support site live Jan 2022; chose Mox after evaluating options | Process9 | [Case study](https://process9.com/case-study/axis-bank-case-study/) | ❌ vendor-published testimonial |
+| 23 | Tata 1mg: 500k+ products in Hindi; Hindi sessions 2× in a month | Process9 | [Case study](https://process9.com/case-study/tata-1mg/) | ❌ vendor-published |
+| 24 | Startup India: ~5 years of use, "good accuracy" at volume | Process9 | [Process9 site](https://process9.com/) | ❌ vendor-published |
+| 25 | Customers incl. Paytm, PolicyBazaar, MakeMyTrip, BookMyShow; PolicyBazaar 3× interest in Hindi | Process9 | [YourStory](https://yourstory.com/2020/10/raise-2020-startup-indic-language-interface-paytm-policybazaar) | ⚠️ press, based on company interview |
+| 26 | No independent benchmark, academic evaluation, or public user review found | Process9 | Searches of academic, G2/Capterra, community sources | — (absence of evidence) |
+| 27 | RTX 5090 specs: 32GB GDDR7, 1.79TB/s bandwidth | Hardware | [Runpod](https://www.runpod.io/articles/guides/nvidia-rtx-5090), [Spheron](https://www.spheron.network/blog/nvidia-rtx-5090-specs/) | ✅ |
+| 28 | 12B model: ~24GB BF16 weights, full FT tight on 32GB; QLoRA needs <16GB | Hardware sizing | [Spheron sizing guide](https://www.spheron.network/blog/gpu-vram-requirements-fine-tune-llm-2026/) | ✅ |
+| 29 | 27B QLoRA feasible on 32GB card with gradient checkpointing, ~4K sequence length | Hardware sizing | [ai.rs](https://ai.rs/ai-developer/gemma-4-lora-fine-tuning-rtx-5090) | ✅ (practitioner writeup) |
+| 30 | Full fine-tuning outperforms LoRA on translation perplexity/BLEU in general comparisons | Fine-tuning method | [arXiv 2504.01919](https://arxiv.org/pdf/2504.01919), [Gradient Flow](https://gradientflow.com/lora-or-full-fine-tuning/) | ✅ |
+| 31 | Domain-adaptation fine-tuning needs only thousands of in-domain pairs vs. millions for base training | Fine-tuning / dataset sizing | [arXiv 2104.06951](https://arxiv.org/pdf/2104.06951) | ✅ |
+| 32 | Sentence-concatenation is a standard, effective document-level MT training method, esp. in high-resource settings | Document-level MT method | [Survey, arXiv 1912.08494](https://arxiv.org/pdf/1912.08494) | ✅ |
+| 33 | IndicTrans2 has official LoRA fine-tuning scripts + IndicTransToolkit; legal-domain fine-tune (InLegalTrans) exists as precedent | IndicTrans2 fine-tuning | [GitHub](https://github.com/ai4bharat/IndicTrans2), [InLegalTrans HF](https://huggingface.co/law-ai/InLegalTrans-En2Indic-1B) | ✅ |
 
 ---
 
-## Fine-tuning your own model on your own dataset
+## 9. Caveats on this research
 
-If you have (or can build) a parallel English–Hindi corpus of your own news content, fine-tuning beats using any of the above off the shelf — domain-adapted models consistently outperform generic ones, and "adaptation sets… may have thousands of sentence pairs, while training the original model could use millions" ([survey, arXiv 2104.06951](https://arxiv.org/pdf/2104.06951)). Fine-tuning on in-domain data gets a large share of that improvement for a small fraction of the compute of retraining from scratch (same survey).
-
-### Which base model to fine-tune
-
-| | Fine-tune **IndicTrans2** | Fine-tune **IndicTrans3-beta** | Fine-tune **TranslateGemma / Gemma 3** |
-|---|---|---|---|
-| Recommended for you | **Yes — start here** | Only as a second experiment | Only if you have a GPU and want to also try a bigger, more fluent model |
-| Why | Small (200M/1B), MIT-licensed, official LoRA fine-tuning scripts exist, proven base accuracy, cheap to fine-tune and serve | Newer Gemma-3 backbone with document-level translation, same team, best long-term ceiling — but still beta, no fine-tuning recipe published yet | LLM fluency; useful if your target register is more conversational/summary-style, not literal |
-| Tooling | Official scripts in the `IndicTrans2` repo (`huggingface_interface`), tokenizer/preprocessing via **IndicTransToolkit** ([GitHub](https://github.com/ai4bharat/IndicTrans2), [PyPI](https://pypi.org/project/IndicTrans2/)) | No official fine-tuning recipe found yet (beta) | Hugging Face + `SFTTrainer`, or **Unsloth** for faster/cheaper LoRA/QLoRA ([Google guide](https://ai.google.dev/gemma/docs/core/huggingface_text_finetune_qlora), [Unsloth](https://www.firecrawl.dev/blog/gemma-3-fine-tuning-firecrawl-unsloth)) |
-| Proven precedent | Yes — AI4Bharat's own conversational-register adaptation ([arXiv 2606.29024](https://arxiv.org/abs/2606.29024)), and a legal-domain fine-tune, **InLegalTrans-En2Indic-1B** ([HF](https://huggingface.co/law-ai/InLegalTrans-En2Indic-1B)), show this pattern works for narrow, in-domain corpora | None found yet | Common pattern for Gemma generally, not news-translation specific |
-| Hardware to fine-tune | Modest — a single consumer GPU (or even CPU for the 200M model) is enough for LoRA on a few thousand sentence pairs | Unknown, but Gemma-3-based so similar to Gemma below | Needs a GPU; QLoRA (4-bit) cuts memory sharply and is the standard approach |
-| Risk | Low — LoRA freezes the base model, so you can't easily break its general behavior; the base is already strong on news-style text | Medium — beta model, no track record | Catastrophic forgetting / drifting off literal translation if not careful; needs a held-out generic-domain eval set to catch regressions |
-
-**My recommendation: fine-tune `ai4bharat/indictrans2-en-indic-1B` (or the 200M distilled model if you need CPU-only serving) with LoRA on your own headline/summary corpus.** It's the lowest-risk, cheapest, best-precedented path, and it directly targets your actual use case (short, formal news text) rather than a general-purpose model you then have to constrain.
-
-Treat **IndicTrans3-beta** and **TranslateGemma** as a parallel, lower-priority experiment once the IndicTrans2 fine-tune is working — same blind-test methodology, not a replacement for it.
-
-### How to build the dataset from this repo
-
-This repo has no bundled parallel corpus yet (`feeds/` is empty aside from a placeholder). To get a fine-tuning set:
-
-1. **Collect a bilingual pool.** You need English source text paired with a *human-quality* Hindi translation, not machine output, or the fine-tune will just learn to imitate whichever MT engine you used. Sources that work well for a Hindi-news domain adaptation:
-   - Hindi-language news outlets that also publish (or are translated from) English wire copy, if you can license/scrape them appropriately.
-   - Public corpora as a base to mix in: **BPCC** (the corpus IndicTrans2 itself was trained on, ~230M pairs, [Bhashini](https://static.pib.gov.in/WriteReadData/specificdocs/documents/2022/aug/doc202282696201.pdf)), and **Samanantar** ([arXiv 2104.05596](https://arxiv.org/pdf/2104.05596)), so the fine-tune doesn't overfit to a tiny custom set and forget general Hindi.
-   - A small held-out human-reviewed set of your *own* actual headlines, even a few hundred pairs, matters more than volume for domain match.
-2. **Target size:** a few thousand in-domain sentence pairs is a realistic, useful starting point per the domain-adaptation literature above — you don't need millions. More helps, but returns diminish quickly once the register/vocabulary is covered.
-3. **Use experience replay.** Mix a slice of general-domain data (BPCC/Samanantar) back into training alongside your in-domain set, the same technique AI4Bharat used for conversational adaptation ([arXiv 2606.29024](https://arxiv.org/abs/2606.29024)). This is what prevents the model from forgetting general Hindi while it specializes on your headlines.
-4. **Fine-tune with LoRA**, not full fine-tuning, given the small dataset size — it's cheaper, faster, and much less prone to overfitting/forgetting on a few thousand pairs.
-5. **Evaluate on two sets, not one:** (a) a held-out slice of your own news data, to measure the domain gain, and (b) a generic set like FLORES/IN22, to make sure you haven't regressed general Hindi. Then run the same native-speaker blind test described below against the un-fine-tuned baseline.
-6. **Watch named entities and numbers.** These are the most common failure points in news MT generally, and the easiest to fix with a modest amount of domain-specific data (proper nouns, org names, figures) that a generic corpus won't have covered well.
-
----
-
-## Revised recommendation: GPUs available, large EN–Hindi dataset, need contextual understanding
-
-This changes the answer. With no GPU and a small dataset, IndicTrans2 was the safe default. **With GPUs and a large corpus, and a requirement for context (not just isolated sentence accuracy), IndicTrans2 stops being the right base model** — and a Gemma-3-based LLM becomes the better starting point.
-
-**Why IndicTrans2 is the wrong base now:** it is a **sentence-level** encoder-decoder model. It translates one sentence at a time with no visibility into surrounding sentences, so it cannot resolve cross-sentence pronouns, keep terminology consistent across a paragraph, or use prior context to disambiguate a word. This isn't a training-data problem you can fix by fine-tuning more — it's architectural. A dedicated 2026 benchmark, **IndicDISCO-MT**, was built specifically because sentence-level Indic MT systems fail on discourse phenomena like pronoun resolution and lexical cohesion ([ACL Anthology 2026.eamt-1.15](https://aclanthology.org/2026.eamt-1.15/)). Fine-tuning IndicTrans2 on your data would still inherit that ceiling.
-
-**Recommended base model: `google/translategemma-12b-it` (or `-27b-it` if your GPUs can serve it)**, not vanilla Gemma 3. TranslateGemma is already translation-specialized (two-stage SFT + RL for translation quality, per its own technical report — [alphaXiv](https://www.alphaxiv.org/overview/2601.09012)), so your fine-tune specializes an already-competent translator rather than teaching translation from scratch. It's also the one model in this whole comparison whose own evaluation explicitly measures document-level context — coherence, pronoun/reference consistency, lexical cohesion, cross-sentence adequacy — which is exactly the property you're asking for.
-
-**Second, lower-priority track:** `ai4bharat/IndicTrans3-beta`. It's also Gemma-3-based and built for document-level translation, from the team with the best Indic accuracy track record — but no fine-tuning recipe or independent benchmark exists for it yet (see the IndicTrans3 section above). Worth a parallel pilot, not your primary bet.
-
-### Full fine-tuning vs. LoRA, now that you have the budget
-
-With a large dataset and real GPUs, the calculus flips from the earlier LoRA-only advice:
-- **Full fine-tuning tends to beat LoRA specifically on translation quality** — one comparison found full fine-tuning "consistently outperforms LoRA in reducing perplexity," and that LoRA's parameter savings come with a measurable BLEU cost ([survey, arXiv 2504.01919](https://arxiv.org/pdf/2504.01919); [Gradient Flow](https://gradientflow.com/lora-or-full-fine-tuning/)). Full fine-tuning is the better choice "when accuracy is paramount" and you have a large domain-relevant dataset.
-- **Practical middle ground:** if 27B full fine-tuning doesn't fit your GPU memory, start with a high-rank LoRA (or QLoRA) run on the 12B or 27B model as a fast, cheap first pass, then decide whether a full fine-tune is worth the extra compute based on how close LoRA gets you. Don't default to LoRA just because it's cheaper — with your data size, it's the fallback, not the first choice.
-
-### Making the fine-tune actually contextual
-
-Feeding isolated (English sentence → Hindi sentence) pairs, even a huge number of them, will **not** teach the model to use context — that has to be built into how you construct training examples:
-
-1. **Keep document/article boundaries in your data.** Since your source is news articles, group sentence pairs back into their original article order rather than shuffling them into a flat sentence-pair list. If your current dataset is already a flat list with no article grouping, that's the first gap to close — contextual training needs to know which sentences belonged together.
-2. **Train on concatenated windows, not single sentences.** The standard, well-validated approach: prepend the preceding N sentences (2–4 is typical) to both the source and target side, with a clear separator, and train the model to translate the *last* sentence in that window correctly given what came before ([survey on document-level NMT](https://arxiv.org/pdf/1912.08494)). This "context concatenation" method is a strong baseline and works especially well precisely in the high-resource setting you're in.
-3. **Vary the window size during training** (some examples with 1 sentence of context, some with 3–4) so the model doesn't overfit to one fixed context length and stays robust at inference when context is shorter (e.g. the first sentence of an article).
-4. **Evaluate discourse quality directly, not just BLEU/chrF.** Standard sentence-level metrics don't reward correct pronoun resolution or consistent terminology across a document — that's the whole reason IndicDISCO-MT exists. Build (or reuse, if licensing allows) a small discourse-focused eval set: same entity referred to across sentences, ambiguous pronouns, repeated terms that must stay consistent, and check those specifically, alongside your usual native-speaker blind test.
-5. **Named entities and numbers stay your other priority** — same as before, and doubly important in a context-aware setting where an entity introduced in sentence 1 needs to be referred to consistently in sentence 3.
-
-### Hardware check: single RTX 5090 (32GB GDDR7, 1.79TB/s bandwidth)
-
-This is one high-end consumer card, not a multi-GPU server, and it changes the full-fine-tune-vs-LoRA answer above:
-
-| Target model | Full fine-tune (BF16) | QLoRA (4-bit) |
-|---|---|---|
-| **TranslateGemma-12B** | Tight to infeasible on 32GB once gradients/optimizer states and a real batch/sequence length are added — BF16 weights alone are ~24GB before training overhead ([Spheron sizing guide](https://www.spheron.network/blog/gpu-vram-requirements-fine-tune-llm-2026/)) | **Comfortable.** 4-bit weights need well under 16GB, leaving plenty of headroom for long context windows and a decent batch size |
-| **TranslateGemma-27B** | **Not feasible** on a single 32GB card | **Feasible, with care.** Reported as working with gradient checkpointing, e.g. sequence length ~4096 on a 32GB card ([ai.rs writeup](https://ai.rs/ai-developer/gemma-4-lora-fine-tuning-rtx-5090)) — but batch size will be small and training slower than 12B |
-
-**So on a single 5090: skip full fine-tuning, do QLoRA.** That doesn't cost you much — the earlier "full fine-tune beats LoRA" evidence was comparing full fine-tuning against *low-rank* LoRA; a well-configured QLoRA run (higher rank, all-linear-layer adapters, enough training steps) closes most of that gap, and it's the only realistic option on this GPU for the 27B model anyway.
-
-**Practical path on one 5090:**
-1. Start with **TranslateGemma-12B + QLoRA**. It fits comfortably, trains faster, and lets you iterate quickly on your context-window data format (this is where most of your quality gain will actually come from, not from model size).
-2. Once that pipeline and your context-concatenation data prep are validated, try **TranslateGemma-27B + QLoRA** on the same card for a direct quality comparison — expect to reduce sequence length or batch size and use gradient checkpointing to make it fit.
-3. If 27B QLoRA still leaves quality on the table and you want a full fine-tune, that needs either a bigger card (80GB-class, e.g. rented A100/H100) or multi-GPU — not a change you can make on this hardware alone. Cross that bridge only after QLoRA has told you whether it's worth it.
-4. One 5090 also comfortably serves your fine-tuned 12B model for inference afterward; 27B inference will fit too, just with less headroom for concurrent requests.
-
-### Revised path, in order
-
-1. Prep the data: verify/rebuild article-level grouping, build concatenated-context training examples, hold out both a generic-domain eval set and a discourse-focused eval set.
-2. Fine-tune `translategemma-12b-it` first (cheaper to iterate on than 27B) — try LoRA/QLoRA as a fast first pass, then full fine-tune if your GPU budget supports it and LoRA leaves quality on the table.
-3. In parallel, pilot `IndicTrans3-beta` on the same data once you can adapt your pipeline to whatever fine-tuning path AI4Bharat documents for it.
-4. Scale to 27B only if 12B's fluency/context handling is the bottleneck, not accuracy.
-5. Run the same native-speaker blind test as before, but score both accuracy *and* discourse coherence, against your fine-tuned model, the un-tuned TranslateGemma baseline, and IndicTrans2 as a sentence-level reference point.
-
----
-
-## Recommendation for this pipeline
-
-1. **Default:** `ai4bharat/indictrans2-en-indic-dist-200M` on CPU, or `indictrans2-en-indic-1B` if a GPU is available. Pre-process with IndicTransToolkit, split into sentences, and optionally convert to CTranslate2 as Wikimedia does. Headlines and summaries are short, formal news text, which is exactly IndicTrans2's strongest case.
-2. **If a GPU (≥16 GB) is available:** run **TranslateGemma-12B/27B** alongside it and compare the two on your own feed.
-3. **Do a 1-hour blind test before committing.** No independent Hindi human evaluation compares these three head to head. Take about 50 real feed items. Translate them with each model, shuffle the outputs, and have a native Hindi speaker rate adequacy (meaning kept?) and fluency (natural Hindi?) on a 1–5 scale. Pay close attention to named entities, numbers and dates, which are the usual failure points in news.
-4. Re-evaluate Bodhan Indic-Translate once independent human evaluations are published.
-
-## Caveats on this research
-- Page fetching was blocked in the research environment. The findings come from search-engine excerpts of the sources linked above, not full-text reads. Verify key numbers against the originals before citing them.
-- No large independent Reddit or community threads came up for Hindi MT specifically. The real-world signals used here are production deployments (Bhashini, Wikimedia MinT), independent academic human evaluations, and user reports on Hugging Face, GitHub and blogs.
+- Page fetching (WebFetch) was blocked throughout this research; every finding above comes from search-engine result excerpts of the linked sources, not full-text reads. **Verify key numbers against the originals** — especially the Bodhan dBLEU figures, the IndicTrans3/Sarvam comparison (finding #17), and any TranslateGemma/IndicTrans3 fine-tuning specifics — before basing engineering decisions solely on this document.
+- No substantial independent community discussion (Reddit, forums) was found specifically for Hindi MT quality. The real-world signal used here rests on production deployments (Bhashini, Wikimedia MinT), a small number of independent academic human-evaluation studies, and scattered user reports on Hugging Face, GitHub, and blogs — treat conclusions as directionally reliable, not as a large-sample consensus.
+- No fine-tuning recipe or benchmark exists yet for IndicTrans3-beta; its section here is necessarily thinner than IndicTrans2/TranslateGemma and should be re-checked before committing engineering time to that track.
+- Dataset-size and hardware-feasibility numbers (§6, findings #27–29) come from general sizing guides and one practitioner writeup, not from an IndicTrans2/TranslateGemma-specific benchmark on an RTX 5090 — validate with a short smoke-test training run before committing to a full experiment plan.
