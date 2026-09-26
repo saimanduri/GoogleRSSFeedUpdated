@@ -1,2 +1,7 @@
 node_modules/
 .env
+
+# Translation corpus data: never commit scraped or curated data to this public repo
+translation_corpus/data/**
+!translation_corpus/data/**/
+!translation_corpus/data/**/.gitkeep
